@@ -96,7 +96,7 @@ def churn_auswerten(df: pd.DataFrame):
     return df_monat_pivot, df_avg, df_12m, df_jahr_pivot
 
 st.set_page_config(layout="wide")
-st.title("Churn-Analyse – Edelweiss-Demo")
+st.title("Churn-Analyse – EDELWEISS Digital")
 
 file = st.file_uploader("Lade eine Excel-Datei hoch", type=["xlsx"])
 
