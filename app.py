@@ -71,10 +71,10 @@ def churn_auswerten(df: pd.DataFrame):
     df_avg = df_monatlich.groupby('Gruppe')['ChurnRate (%)'].mean().round(1).reset_index()
 
     ## Jahres-Churn (12M)
-    today = date.today()
-    last_full = today.replace(day=1) - relativedelta(days=1)
-    start = (last_full - relativedelta(months=11)).replace(day=1)
-    end = last_full
+    today = pd.Timestamp.today()
+last_full = today.replace(day=1) - pd.Timedelta(days=1)
+start = (last_full - relativedelta(months=11)).replace(day=1)
+end = last_full
     ann_records = []
     for group, gdf in df.groupby('ProductGroup'):
         active = gdf[(gdf['Beginn'] < pd.Timestamp(start)) & ((gdf['Ende'].isna()) | (gdf['Ende'] >= pd.Timestamp(start)))]
