@@ -75,7 +75,7 @@ def churn_auswerten(df: pd.DataFrame):
 last_full = today.replace(day=1) - pd.Timedelta(days=1)
 start = (last_full - relativedelta(months=11)).replace(day=1)
 end = last_full
-    ann_records = []
+ann_records = []
     for group, gdf in df.groupby('ProductGroup'):
         active = gdf[(gdf['Beginn'] < pd.Timestamp(start)) & ((gdf['Ende'].isna()) | (gdf['Ende'] >= pd.Timestamp(start)))]
         churned = gdf[(gdf['Ende'] >= pd.Timestamp(start)) & (gdf['Ende'] <= pd.Timestamp(end))]
