@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import calendar
@@ -8,15 +7,13 @@ import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
-# Relevante Gruppen
 RELEVANT_GROUPS = [
     "Firmendaten Manager", "Website", "SEO", "Google Ads",
     "Postings", "Superkombis", "Social Media Werbeanzeigen"
 ]
 
-# Monatsliste
-def last_12_full_months(ref_date: date):
-    last_full = ref_date.replace(day=1) - relativedelta(days=1)
+def last_12_full_months(ref_date: pd.Timestamp):
+    last_full = ref_date.replace(day=1) - pd.Timedelta(days=1)
     months = []
     for i in range(12):
         start = (last_full - relativedelta(months=i)).replace(day=1)
@@ -24,7 +21,6 @@ def last_12_full_months(ref_date: date):
         months.append((start, end))
     return list(reversed(months))
 
-# Gruppenzuordnung
 def map_group(row):
     cat = row['Produktkategorie']
     if cat != "Social Media":
@@ -49,7 +45,6 @@ def map_group(row):
         return "Social Media Werbeanzeigen"
     return "Unbekannt"
 
-# Hauptlogik
 def churn_auswerten(df: pd.DataFrame):
     df = df[df['Abo'].astype(str).str.lower().isin(['ja','yes','true','1'])].copy()
     df['ProductGroup'] = df.apply(map_group, axis=1)
@@ -58,7 +53,7 @@ def churn_auswerten(df: pd.DataFrame):
     df['Ende'] = pd.to_datetime(df['Ende'], errors='coerce')
 
     ## Monats-Churn (12 Monate)
-    months = last_12_full_months(date.today())
+    months = last_12_full_months(pd.Timestamp.today())
     records = []
     for group, gdf in df.groupby('ProductGroup'):
         for start_ts, end_ts in months:
@@ -72,13 +67,13 @@ def churn_auswerten(df: pd.DataFrame):
 
     ## Jahres-Churn (12M)
     today = pd.Timestamp.today()
-last_full = today.replace(day=1) - pd.Timedelta(days=1)
-start = (last_full - relativedelta(months=11)).replace(day=1)
-end = last_full
-ann_records = []
+    last_full = today.replace(day=1) - pd.Timedelta(days=1)
+    start = (last_full - relativedelta(months=11)).replace(day=1)
+    end = last_full
+    ann_records = []
     for group, gdf in df.groupby('ProductGroup'):
-        active = gdf[(gdf['Beginn'] < pd.Timestamp(start)) & ((gdf['Ende'].isna()) | (gdf['Ende'] >= pd.Timestamp(start)))]
-        churned = gdf[(gdf['Ende'] >= pd.Timestamp(start)) & (gdf['Ende'] <= pd.Timestamp(end))]
+        active = gdf[(gdf['Beginn'] < start) & ((gdf['Ende'].isna()) | (gdf['Ende'] >= start))]
+        churned = gdf[(gdf['Ende'] >= start) & (gdf['Ende'] <= end)]
         rate = (len(churned) / len(active) * 100) if len(active) > 0 else 0.0
         ann_records.append({'Gruppe': group, 'Jahres-Churn (12M)': round(rate, 1)})
     df_12m = pd.DataFrame(ann_records)
@@ -88,11 +83,11 @@ ann_records = []
     end_year = today.year
     yearly_records = []
     for year in range(start_year, end_year + 1):
-        start = pd.Timestamp(f"{year}-01-01")
-        end = pd.Timestamp(date.today()) if year == end_year else pd.Timestamp(f"{year}-12-31")
+        y_start = pd.Timestamp(f"{year}-01-01")
+        y_end = today if year == end_year else pd.Timestamp(f"{year}-12-31")
         for group, gdf in df.groupby('ProductGroup'):
-            active_start = gdf[(gdf['Beginn'] < start) & ((gdf['Ende'].isna()) | (gdf['Ende'] >= start))]
-            churned_year = active_start[(active_start['Ende'] >= start) & (active_start['Ende'] <= end)]
+            active_start = gdf[(gdf['Beginn'] < y_start) & ((gdf['Ende'].isna()) | (gdf['Ende'] >= y_start))]
+            churned_year = active_start[(active_start['Ende'] >= y_start) & (active_start['Ende'] <= y_end)]
             rate = (len(churned_year) / len(active_start) * 100) if len(active_start) > 0 else 0.0
             yearly_records.append({'Jahr': year, 'Gruppe': group, 'ChurnRate (%)': round(rate, 1)})
     df_jahr = pd.DataFrame(yearly_records)
@@ -100,7 +95,6 @@ ann_records = []
 
     return df_monat_pivot, df_avg, df_12m, df_jahr_pivot
 
-# Streamlit UI
 st.set_page_config(layout="wide")
 st.title("Churn-Analyse – Edelweiss-Demo")
 
