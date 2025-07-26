@@ -339,7 +339,31 @@ st.sidebar.markdown("""
 
 file = st.file_uploader("Lade eine Excel-Datei hoch", type=["xlsx"])
 
+# Berechnung nur starten wenn File vorhanden und Button gedrückt
 if file:
+    st.success("✅ Excel-Datei erfolgreich hochgeladen!")
+    
+    # Vorschau der Daten
+    with st.expander("📋 Datenvorschau (erste 5 Zeilen)"):
+        try:
+            preview_df = pd.read_excel(file, nrows=5)
+            st.dataframe(preview_df)
+        except Exception as e:
+            st.warning(f"Fehler beim Laden der Vorschau: {e}")
+    
+    st.markdown("---")
+    
+    # Zentraler Start-Button
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        start_calculation = st.button(
+            "🚀 Churn-Analyse starten", 
+            type="primary",
+            use_container_width=True,
+            help="Startet die Berechnung mit den aktuellen Einstellungen"
+        )
+    
+    if start_calculation:
     try:
         df = pd.read_excel(file)
         
@@ -352,139 +376,142 @@ if file:
         else:
             results = churn_auswerten_v2(df, grace_period)
             
-            # 🎯 HAUPTFOKUS: Aktueller Jahres-Churn
-            st.header(f"🚨 Aktueller Jahres-Churn {pd.Timestamp.today().year}")
-            
-            # Metrics in Spalten
-            current_churn = results['current_year_churn']
-            if len(current_churn) > 0:
-                cols = st.columns(len(current_churn))
-                for i, (_, row) in enumerate(current_churn.iterrows()):
-                    with cols[i]:
-                        st.metric(
-                            row['Produktgruppe'],
-                            f"{row['Churn Rate (%)']}%",
-                            delta=f"{row['Churned']}/{row['Aktive Kunden']} Kunden",
-                            help=f"Churned: {row['Churned']} von {row['Aktive Kunden']} aktiven Kunden"
-                        )
+                # 🎯 HAUPTFOKUS: Aktueller Jahres-Churn
+                st.header(f"🚨 Aktueller Jahres-Churn {pd.Timestamp.today().year}")
                 
-                # Detaillierte Tabelle
-                st.subheader("Aktuelle Jahres-Churn Details")
-                st.dataframe(current_churn, use_container_width=True)
-            
-            # 📈 Jahres-Verlauf seit 2020
-            st.header("📈 Jahres-Churn Verlauf (seit 2020)")
-            
-            yearly_data = results['yearly_churn']
-            if len(yearly_data) > 0:
-                # Pivot für Chart
-                yearly_pivot = yearly_data.pivot(index='Jahr', columns='Gruppe', values='JahresChurn (%)').fillna(0)
-                
-                # Interaktiver Line Chart
-                fig = go.Figure()
-                
-                colors = px.colors.qualitative.Set3
-                for i, gruppe in enumerate(yearly_pivot.columns):
-                    fig.add_trace(go.Scatter(
-                        x=yearly_pivot.index,
-                        y=yearly_pivot[gruppe],
-                        mode='lines+markers',
-                        name=gruppe,
-                        line=dict(color=colors[i % len(colors)], width=3),
-                        marker=dict(size=8)
-                    ))
-                
-                fig.update_layout(
-                    title="Jahres-Churn Entwicklung nach Produktgruppen",
-                    xaxis_title="Jahr",
-                    yaxis_title="Churn Rate (%)",
-                    hovermode='x unified',
-                    height=500
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Jahres-Tabelle
-                st.subheader("Jahres-Churn Tabelle")
-                display_yearly = yearly_data.pivot(index='Jahr', columns='Gruppe', values='JahresChurn (%)').fillna(0)
-                st.dataframe(display_yearly, use_container_width=True)
-            
-            # Weitere Auswertungen in Tabs
-            st.header("📊 Weitere Auswertungen")
-            tab1, tab2, tab3, tab4 = st.tabs([
-                "🔄 Reaktivierungen", 
-                "📋 Monats-Churn (v1)",
-                "🔍 True Churn Events",
-                "ℹ️ Info & Statistiken"
-            ])
-            
-            with tab1:
-                st.subheader("Reaktivierungs-Statistiken")
-                if len(results['reactivations']) > 0:
-                    st.dataframe(results['reactivations'], use_container_width=True)
+                # Metrics in Spalten
+                current_churn = results['current_year_churn']
+                if len(current_churn) > 0:
+                    cols = st.columns(len(current_churn))
+                    for i, (_, row) in enumerate(current_churn.iterrows()):
+                        with cols[i]:
+                            st.metric(
+                                row['Produktgruppe'],
+                                f"{row['Churn Rate (%)']}%",
+                                delta=f"{row['Churned']}/{row['Aktive Kunden']} Kunden",
+                                help=f"Churned: {row['Churned']} von {row['Aktive Kunden']} aktiven Kunden"
+                            )
                     
-                    if len(results['reactivation_events']) > 0:
-                        st.subheader("Reaktivierungs-Details (Beispiele)")
-                        st.dataframe(
-                            results['reactivation_events'].head(20), 
-                            use_container_width=True
-                        )
-                else:
-                    st.info("Keine Reaktivierungen in den Daten gefunden.")
-            
-            with tab2:
-                st.subheader("Monats-Churn (Original v1 Logik)")
-                st.dataframe(results['v1_pivot'], use_container_width=True)
-                if len(results['v1_pivot']) > 0:
-                    st.line_chart(results['v1_pivot'])
-            
-            with tab3:
-                st.subheader("True Churn Events")
-                if len(results['churn_events']) > 0:
-                    st.dataframe(results['churn_events'], use_container_width=True)
+                    # Detaillierte Tabelle
+                    st.subheader("Aktuelle Jahres-Churn Details")
+                    st.dataframe(current_churn, use_container_width=True)
+                
+                # 📈 Jahres-Verlauf seit 2020
+                st.header("📈 Jahres-Churn Verlauf (seit 2020)")
+                
+                yearly_data = results['yearly_churn']
+                if len(yearly_data) > 0:
+                    # Pivot für Chart
+                    yearly_pivot = yearly_data.pivot(index='Jahr', columns='Gruppe', values='JahresChurn (%)').fillna(0)
                     
-                    # Verteilung nach Typ
-                    churn_types = results['churn_events']['Typ'].value_counts()
-                    st.subheader("Churn-Typen Verteilung")
-                    st.bar_chart(churn_types)
-                else:
-                    st.info("Keine True Churn Events gefunden.")
-            
-            with tab4:
-                st.subheader("📊 Statistiken & Informationen")
+                    # Interaktiver Line Chart
+                    fig = go.Figure()
+                    
+                    colors = px.colors.qualitative.Set3
+                    for i, gruppe in enumerate(yearly_pivot.columns):
+                        fig.add_trace(go.Scatter(
+                            x=yearly_pivot.index,
+                            y=yearly_pivot[gruppe],
+                            mode='lines+markers',
+                            name=gruppe,
+                            line=dict(color=colors[i % len(colors)], width=3),
+                            marker=dict(size=8)
+                        ))
+                    
+                    fig.update_layout(
+                        title="Jahres-Churn Entwicklung nach Produktgruppen",
+                        xaxis_title="Jahr",
+                        yaxis_title="Churn Rate (%)",
+                        hovermode='x unified',
+                        height=500
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Jahres-Tabelle
+                    st.subheader("Jahres-Churn Tabelle")
+                    display_yearly = yearly_data.pivot(index='Jahr', columns='Gruppe', values='JahresChurn (%)').fillna(0)
+                    st.dataframe(display_yearly, use_container_width=True)
                 
-                total_customers = df['Kundennummer'].nunique()
-                reseller_count = df[df['Kundennummer'].isin(RESELLER_CUSTOMERS)]['Kundennummer'].nunique()
-                regular_customers = total_customers - reseller_count
-                total_reactivations = results['reactivations']['Anzahl Reaktivierungen'].sum() if len(results['reactivations']) > 0 else 0
+                # Weitere Auswertungen in Tabs
+                st.header("📊 Weitere Auswertungen")
+                tab1, tab2, tab3, tab4 = st.tabs([
+                    "🔄 Reaktivierungen", 
+                    "📋 Monats-Churn (v1)",
+                    "🔍 True Churn Events",
+                    "ℹ️ Info & Statistiken"
+                ])
                 
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Gesamt Kunden", total_customers)
-                with col2:
-                    st.metric("Reguläre Kunden", regular_customers)
-                with col3:
-                    st.metric("Reseller", reseller_count)
-                with col4:
-                    st.metric("Reaktivierungen", total_reactivations)
+                with tab1:
+                    st.subheader("Reaktivierungs-Statistiken")
+                    if len(results['reactivations']) > 0:
+                        st.dataframe(results['reactivations'], use_container_width=True)
+                        
+                        if len(results['reactivation_events']) > 0:
+                            st.subheader("Reaktivierungs-Details (Beispiele)")
+                            st.dataframe(
+                                results['reactivation_events'].head(20), 
+                                use_container_width=True
+                            )
+                    else:
+                        st.info("Keine Reaktivierungen in den Daten gefunden.")
                 
-                st.markdown("---")
-                st.markdown("### 🔍 Methodik")
-                st.markdown(f"""
-                **True Churn Berechnung:**
-                - **Reguläre Kunden:** Berücksichtigung von Reaktivierungen (Karenzzeit: {grace_period} Tage)
-                - **Reseller:** Verwenden Original v1-Logik (vertragsbasiert)
-                - **Jahres-Churn:** Kombination beider Methoden für realistische Gesamtrate
+                with tab2:
+                    st.subheader("Monats-Churn (Original v1 Logik)")
+                    st.dataframe(results['v1_pivot'], use_container_width=True)
+                    if len(results['v1_pivot']) > 0:
+                        st.line_chart(results['v1_pivot'])
                 
-                **Vorteile:**
-                - Realistische Churn-Raten durch Reaktivierungs-Berücksichtigung
-                - Korrekte Behandlung von Reseller-Geschäftsmodellen
-                - Fokus auf geschäftsrelevante Jahres-KPIs
-                """)
+                with tab3:
+                    st.subheader("True Churn Events")
+                    if len(results['churn_events']) > 0:
+                        st.dataframe(results['churn_events'], use_container_width=True)
+                        
+                        # Verteilung nach Typ
+                        churn_types = results['churn_events']['Typ'].value_counts()
+                        st.subheader("Churn-Typen Verteilung")
+                        st.bar_chart(churn_types)
+                    else:
+                        st.info("Keine True Churn Events gefunden.")
+                
+                with tab4:
+                    st.subheader("📊 Statistiken & Informationen")
+                    
+                    total_customers = df['Kundennummer'].nunique()
+                    reseller_count = df[df['Kundennummer'].isin(RESELLER_CUSTOMERS)]['Kundennummer'].nunique()
+                    regular_customers = total_customers - reseller_count
+                    total_reactivations = results['reactivations']['Anzahl Reaktivierungen'].sum() if len(results['reactivations']) > 0 else 0
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Gesamt Kunden", total_customers)
+                    with col2:
+                        st.metric("Reguläre Kunden", regular_customers)
+                    with col3:
+                        st.metric("Reseller", reseller_count)
+                    with col4:
+                        st.metric("Reaktivierungen", total_reactivations)
+                    
+                    st.markdown("---")
+                    st.markdown("### 🔍 Methodik")
+                    st.markdown(f"""
+                    **True Churn Berechnung:**
+                    - **Reguläre Kunden:** Berücksichtigung von Reaktivierungen (Karenzzeit: {grace_period} Tage)
+                    - **Reseller:** Verwenden Original v1-Logik (vertragsbasiert)
+                    - **Jahres-Churn:** Kombination beider Methoden für realistische Gesamtrate
+                    
+                    **Vorteile:**
+                    - Realistische Churn-Raten durch Reaktivierungs-Berücksichtigung
+                    - Korrekte Behandlung von Reseller-Geschäftsmodellen
+                    - Fokus auf geschäftsrelevante Jahres-KPIs
+                    """)
 
-    except Exception as e:
-        st.error(f"Fehler beim Verarbeiten der Datei: {e}")
-        st.exception(e)
+            except Exception as e:
+                st.error(f"❌ Fehler beim Verarbeiten der Datei: {e}")
+                st.exception(e)
+    
+else:
+    st.info("👆 Bitte laden Sie eine Excel-Datei hoch, um mit der Analyse zu beginnen.")
 
 # Footer
 st.markdown("---")
