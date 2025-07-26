@@ -4,6 +4,8 @@ import calendar
 from datetime import date
 from dateutil.relativedelta import relativedelta
 import warnings
+import plotly.express as px
+import plotly.graph_objects as go
 
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
@@ -11,6 +13,9 @@ RELEVANT_GROUPS = [
     "Firmendaten Manager", "Website", "SEO", "Google Ads",
     "Postings", "Superkombis", "Social Media Werbeanzeigen"
 ]
+
+# Reseller-Kundennummern (verwenden v1-Logik)
+RESELLER_CUSTOMERS = [1902101, 1909143, 1903121, 1905146, 1911102]
 
 def last_12_full_months(ref_date: pd.Timestamp):
     last_full = ref_date.replace(day=1) - pd.Timedelta(days=1)
@@ -48,9 +53,13 @@ def map_group(row):
 def analyze_customer_journey(df: pd.DataFrame, grace_period_days: int = 90):
     """
     Analysiert Kundenverlauf und identifiziert True Churn vs. Reaktivierungen
+    Reseller werden ausgeschlossen (verwenden v1-Logik)
     """
+    # Reseller ausschließen für True Churn
+    df_no_reseller = df[~df['Kundennummer'].isin(RESELLER_CUSTOMERS)].copy()
+    
     # Kundenverlauf pro Kunde/Produkt aufbauen
-    df_sorted = df.sort_values(['Kundennummer', 'ProductGroup', 'Beginn'])
+    df_sorted = df_no_reseller.sort_values(['Kundennummer', 'ProductGroup', 'Beginn'])
     
     churn_events = []
     reactivations = []
@@ -105,65 +114,169 @@ def analyze_customer_journey(df: pd.DataFrame, grace_period_days: int = 90):
     
     return pd.DataFrame(churn_events), pd.DataFrame(reactivations)
 
-def calculate_true_churn_rates(df: pd.DataFrame, churn_events: pd.DataFrame, grace_period_days: int = 90):
+def calculate_yearly_churn(df: pd.DataFrame, churn_events: pd.DataFrame, start_year: int = 2020):
     """
-    Berechnet True Churn Raten basierend auf der Kundenverlaufs-Analyse
+    Berechnet Jahres-Churn Raten ab 2020 mit True Churn für Nicht-Reseller
     """
-    months = last_12_full_months(pd.Timestamp.today())
-    records = []
+    today = pd.Timestamp.today()
+    end_year = today.year
+    yearly_records = []
     
-    for group in RELEVANT_GROUPS:
-        group_df = df[df['ProductGroup'] == group]
-        group_churn = churn_events[churn_events['ProductGroup'] == group]
+    for year in range(start_year, end_year + 1):
+        y_start = pd.Timestamp(f"{year}-01-01")
+        y_end = today if year == end_year else pd.Timestamp(f"{year}-12-31")
         
-        if len(group_df) == 0:
-            continue
+        for group in RELEVANT_GROUPS:
+            # Alle Kunden dieser Gruppe
+            group_df = df[df['ProductGroup'] == group]
             
-        for start_ts, end_ts in months:
-            # Aktive Kunden zu Monatsbeginn (basierend auf aktiven Verträgen)
+            if len(group_df) == 0:
+                continue
+            
+            # Reseller und Nicht-Reseller trennen
+            reseller_df = group_df[group_df['Kundennummer'].isin(RESELLER_CUSTOMERS)]
+            regular_df = group_df[~group_df['Kundennummer'].isin(RESELLER_CUSTOMERS)]
+            
+            # Aktive Kunden zu Jahresbeginn
             active_customers = set()
-            for kunde, kunde_df in group_df.groupby('Kundennummer'):
-                # Kunde ist aktiv wenn mindestens ein Vertrag aktiv ist
+            
+            # Reguläre Kunden (kundenbasiert)
+            for kunde, kunde_df in regular_df.groupby('Kundennummer'):
                 kunde_active = kunde_df[
-                    (kunde_df['Beginn'] < start_ts) & 
-                    ((kunde_df['Ende'].isna()) | (kunde_df['Ende'] >= start_ts))
+                    (kunde_df['Beginn'] < y_start) & 
+                    ((kunde_df['Ende'].isna()) | (kunde_df['Ende'] >= y_start))
                 ]
                 if len(kunde_active) > 0:
                     active_customers.add(kunde)
             
-            # True Churn Events in diesem Monat
-            churned_customers = set(group_churn[
-                (group_churn['ChurnDatum'] >= start_ts) & 
-                (group_churn['ChurnDatum'] <= end_ts)
+            # Reseller (vertragsbasiert - wie v1)
+            reseller_active = reseller_df[
+                (reseller_df['Beginn'] < y_start) & 
+                ((reseller_df['Ende'].isna()) | (reseller_df['Ende'] >= y_start))
+            ]
+            num_reseller_active = len(reseller_active)
+            
+            # Churn Events
+            # True Churn für reguläre Kunden
+            regular_churned = set(churn_events[
+                (churn_events['ProductGroup'] == group) &
+                (churn_events['ChurnDatum'] >= y_start) & 
+                (churn_events['ChurnDatum'] <= y_end)
             ]['Kundennummer'].unique())
             
-            # True Churn Rate berechnen
-            num_active = len(active_customers)
-            num_churned = len(churned_customers)
-            true_churn_rate = (num_churned / num_active * 100) if num_active > 0 else 0.0
+            # V1 Churn für Reseller
+            reseller_churned = reseller_df[
+                (reseller_df['Ende'] >= y_start) & 
+                (reseller_df['Ende'] <= y_end)
+            ]
+            num_reseller_churned = len(reseller_churned)
             
-            records.append({
-                'Monat': start_ts.strftime("%Y-%m"),
+            # Gesamte Churn Rate berechnen
+            total_active = len(active_customers) + num_reseller_active
+            total_churned = len(regular_churned) + num_reseller_churned
+            
+            churn_rate = (total_churned / total_active * 100) if total_active > 0 else 0.0
+            
+            yearly_records.append({
+                'Jahr': year,
                 'Gruppe': group,
-                'AktiveKunden': num_active,
-                'ChurnedKunden': num_churned,
-                'TrueChurnRate (%)': round(true_churn_rate, 1)
+                'AktiveKunden': len(active_customers),
+                'AktiveReseller': num_reseller_active,
+                'GesamtAktiv': total_active,
+                'ChurnedKunden': len(regular_churned),
+                'ChurnedReseller': num_reseller_churned,
+                'GesamtChurned': total_churned,
+                'JahresChurn (%)': round(churn_rate, 1)
             })
     
-    return pd.DataFrame(records)
+    return pd.DataFrame(yearly_records)
+
+def calculate_current_year_churn(df: pd.DataFrame, churn_events: pd.DataFrame):
+    """
+    Berechnet aktuellen Jahres-Churn (laufendes Jahr)
+    """
+    today = pd.Timestamp.today()
+    y_start = pd.Timestamp(f"{today.year}-01-01")
+    
+    current_churn = []
+    
+    for group in RELEVANT_GROUPS:
+        group_df = df[df['ProductGroup'] == group]
+        
+        if len(group_df) == 0:
+            current_churn.append({
+                'Produktgruppe': group,
+                'Aktive Kunden': 0,
+                'Churned': 0,
+                'Churn Rate (%)': 0.0
+            })
+            continue
+        
+        # Reseller und Nicht-Reseller trennen
+        reseller_df = group_df[group_df['Kundennummer'].isin(RESELLER_CUSTOMERS)]
+        regular_df = group_df[~group_df['Kundennummer'].isin(RESELLER_CUSTOMERS)]
+        
+        # Aktive Kunden zu Jahresbeginn
+        active_customers = set()
+        for kunde, kunde_df in regular_df.groupby('Kundennummer'):
+            kunde_active = kunde_df[
+                (kunde_df['Beginn'] < y_start) & 
+                ((kunde_df['Ende'].isna()) | (kunde_df['Ende'] >= y_start))
+            ]
+            if len(kunde_active) > 0:
+                active_customers.add(kunde)
+        
+        # Aktive Reseller
+        reseller_active = len(reseller_df[
+            (reseller_df['Beginn'] < y_start) & 
+            ((reseller_df['Ende'].isna()) | (reseller_df['Ende'] >= y_start))
+        ])
+        
+        # Churn Events dieses Jahr
+        regular_churned = len(set(churn_events[
+            (churn_events['ProductGroup'] == group) &
+            (churn_events['ChurnDatum'] >= y_start)
+        ]['Kundennummer'].unique()))
+        
+        reseller_churned = len(reseller_df[
+            (reseller_df['Ende'] >= y_start)
+        ])
+        
+        total_active = len(active_customers) + reseller_active
+        total_churned = regular_churned + reseller_churned
+        churn_rate = (total_churned / total_active * 100) if total_active > 0 else 0.0
+        
+        current_churn.append({
+            'Produktgruppe': group,
+            'Aktive Kunden': total_active,
+            'Churned': total_churned,
+            'Churn Rate (%)': round(churn_rate, 1)
+        })
+    
+    return pd.DataFrame(current_churn)
 
 def churn_auswerten_v2(df: pd.DataFrame, grace_period_days: int = 90):
     """
-    Erweiterte Churn-Analyse mit True Churn Berechnung
+    Erweiterte Churn-Analyse mit True Churn Berechnung und Reseller-Behandlung
     """
-    # Originale v1 Logik
+    # Daten vorbereiten
     df = df[df['Abo'].astype(str).str.lower().isin(['ja','yes','true','1'])].copy()
     df['ProductGroup'] = df.apply(map_group, axis=1)
     df = df[df['ProductGroup'].isin(RELEVANT_GROUPS)]
     df['Beginn'] = pd.to_datetime(df['Beginn'], errors='coerce')
     df['Ende'] = pd.to_datetime(df['Ende'], errors='coerce')
+    
+    # Kundennummer zu int konvertieren
+    df['Kundennummer'] = pd.to_numeric(df['Kundennummer'], errors='coerce').fillna(0).astype(int)
 
-    # V1 - Original Churn (Vertragsbasiert)
+    # True Churn Analyse (ohne Reseller)
+    churn_events, reactivations = analyze_customer_journey(df, grace_period_days)
+    
+    # Jahres-Churn berechnen
+    yearly_churn = calculate_yearly_churn(df, churn_events, start_year=2020)
+    current_year_churn = calculate_current_year_churn(df, churn_events)
+    
+    # Monatliche Daten für andere Auswertungen
     months = last_12_full_months(pd.Timestamp.today())
     v1_records = []
     for group, gdf in df.groupby('ProductGroup'):
@@ -179,28 +292,6 @@ def churn_auswerten_v2(df: pd.DataFrame, grace_period_days: int = 90):
     df_v1 = pd.DataFrame(v1_records)
     df_v1_pivot = df_v1.pivot(index='Monat', columns='Gruppe', values='OriginalChurn (%)').fillna(0)
 
-    # V2 - True Churn Analyse
-    churn_events, reactivations = analyze_customer_journey(df, grace_period_days)
-    df_true_churn = calculate_true_churn_rates(df, churn_events, grace_period_days)
-    df_v2_pivot = df_true_churn.pivot(index='Monat', columns='Gruppe', values='TrueChurnRate (%)').fillna(0)
-
-    # Vergleichstabelle
-    comparison_records = []
-    for group in RELEVANT_GROUPS:
-        if group in df_v1_pivot.columns and group in df_v2_pivot.columns:
-            orig_avg = df_v1_pivot[group].mean()
-            true_avg = df_v2_pivot[group].mean()
-            improvement = orig_avg - true_avg
-            
-            comparison_records.append({
-                'Produktgruppe': group,
-                'Original Churn Ø (%)': round(orig_avg, 1),
-                'True Churn Ø (%)': round(true_avg, 1),
-                'Verbesserung (%)': round(improvement, 1)
-            })
-    
-    df_comparison = pd.DataFrame(comparison_records)
-
     # Reaktivierungs-Statistiken
     if len(reactivations) > 0:
         react_stats = reactivations.groupby('ProductGroup').agg({
@@ -212,9 +303,9 @@ def churn_auswerten_v2(df: pd.DataFrame, grace_period_days: int = 90):
         react_stats = pd.DataFrame(columns=['Produktgruppe', 'Anzahl Reaktivierungen', 'Ø Pause (Tage)'])
 
     return {
+        'current_year_churn': current_year_churn,
+        'yearly_churn': yearly_churn,
         'v1_pivot': df_v1_pivot,
-        'v2_pivot': df_v2_pivot, 
-        'comparison': df_comparison,
         'reactivations': react_stats,
         'churn_events': churn_events,
         'reactivation_events': reactivations
@@ -222,8 +313,8 @@ def churn_auswerten_v2(df: pd.DataFrame, grace_period_days: int = 90):
 
 # Streamlit App
 st.set_page_config(layout="wide")
-st.title("Churn-Analyse v2 – EDELWEISS Digital")
-st.markdown("**True Churn Analyse** mit Berücksichtigung von Kundenverlauf und Reaktivierungen")
+st.title("🎯 Jahres-Churn Analyse v2 – EDELWEISS Digital")
+st.markdown("**True Churn Analyse** mit Reseller-Berücksichtigung und Fokus auf Jahres-Churn")
 
 # Sidebar für Einstellungen
 st.sidebar.header("Einstellungen")
@@ -235,6 +326,16 @@ grace_period = st.sidebar.slider(
     step=15,
     help="Kunden die innerhalb dieser Zeit das gleiche Produkt neu abschließen gelten nicht als Churn"
 )
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🏢 Reseller (verwenden v1-Logik)")
+st.sidebar.markdown("""
+- 1902101 - Onco
+- 1909143 - Russmedia Verlag  
+- 1903121 - Russmedia Digital
+- 1905146 - Northlight
+- 1911102 - Sam Solution
+""")
 
 file = st.file_uploader("Lade eine Excel-Datei hoch", type=["xlsx"])
 
@@ -251,43 +352,77 @@ if file:
         else:
             results = churn_auswerten_v2(df, grace_period)
             
-            # Tabs für bessere Übersicht
-            tab1, tab2, tab3, tab4, tab5 = st.tabs([
-                "📊 Vergleich v1 vs v2", 
-                "📈 True Churn Details", 
+            # 🎯 HAUPTFOKUS: Aktueller Jahres-Churn
+            st.header(f"🚨 Aktueller Jahres-Churn {pd.Timestamp.today().year}")
+            
+            # Metrics in Spalten
+            current_churn = results['current_year_churn']
+            if len(current_churn) > 0:
+                cols = st.columns(len(current_churn))
+                for i, (_, row) in enumerate(current_churn.iterrows()):
+                    with cols[i]:
+                        st.metric(
+                            row['Produktgruppe'],
+                            f"{row['Churn Rate (%)']}%",
+                            delta=f"{row['Churned']}/{row['Aktive Kunden']} Kunden",
+                            help=f"Churned: {row['Churned']} von {row['Aktive Kunden']} aktiven Kunden"
+                        )
+                
+                # Detaillierte Tabelle
+                st.subheader("Aktuelle Jahres-Churn Details")
+                st.dataframe(current_churn, use_container_width=True)
+            
+            # 📈 Jahres-Verlauf seit 2020
+            st.header("📈 Jahres-Churn Verlauf (seit 2020)")
+            
+            yearly_data = results['yearly_churn']
+            if len(yearly_data) > 0:
+                # Pivot für Chart
+                yearly_pivot = yearly_data.pivot(index='Jahr', columns='Gruppe', values='JahresChurn (%)').fillna(0)
+                
+                # Interaktiver Line Chart
+                fig = go.Figure()
+                
+                colors = px.colors.qualitative.Set3
+                for i, gruppe in enumerate(yearly_pivot.columns):
+                    fig.add_trace(go.Scatter(
+                        x=yearly_pivot.index,
+                        y=yearly_pivot[gruppe],
+                        mode='lines+markers',
+                        name=gruppe,
+                        line=dict(color=colors[i % len(colors)], width=3),
+                        marker=dict(size=8)
+                    ))
+                
+                fig.update_layout(
+                    title="Jahres-Churn Entwicklung nach Produktgruppen",
+                    xaxis_title="Jahr",
+                    yaxis_title="Churn Rate (%)",
+                    hovermode='x unified',
+                    height=500
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Jahres-Tabelle
+                st.subheader("Jahres-Churn Tabelle")
+                display_yearly = yearly_data.pivot(index='Jahr', columns='Gruppe', values='JahresChurn (%)').fillna(0)
+                st.dataframe(display_yearly, use_container_width=True)
+            
+            # Weitere Auswertungen in Tabs
+            st.header("📊 Weitere Auswertungen")
+            tab1, tab2, tab3, tab4 = st.tabs([
                 "🔄 Reaktivierungen", 
-                "📋 Original Churn (v1)",
-                "🔍 Rohdaten"
+                "📋 Monats-Churn (v1)",
+                "🔍 True Churn Events",
+                "ℹ️ Info & Statistiken"
             ])
             
             with tab1:
-                st.subheader("Vergleich: Original vs. True Churn")
-                st.dataframe(results['comparison'], use_container_width=True)
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric(
-                        "Durchschnittliche Verbesserung", 
-                        f"{results['comparison']['Verbesserung (%)'].mean():.1f}%",
-                        help="Wie viel niedriger ist die True Churn Rate im Durchschnitt"
-                    )
-                with col2:
-                    total_reactivations = results['reactivations']['Anzahl Reaktivierungen'].sum() if len(results['reactivations']) > 0 else 0
-                    st.metric("Gesamt Reaktivierungen", f"{total_reactivations}")
-            
-            with tab2:
-                st.subheader("True Churn Raten (letzte 12 Monate)")
-                st.dataframe(results['v2_pivot'], use_container_width=True)
-                
-                if len(results['v2_pivot']) > 0:
-                    st.line_chart(results['v2_pivot'])
-            
-            with tab3:
                 st.subheader("Reaktivierungs-Statistiken")
                 if len(results['reactivations']) > 0:
                     st.dataframe(results['reactivations'], use_container_width=True)
                     
-                    # Details zu Reaktivierungen
                     if len(results['reactivation_events']) > 0:
                         st.subheader("Reaktivierungs-Details (Beispiele)")
                         st.dataframe(
@@ -297,39 +432,60 @@ if file:
                 else:
                     st.info("Keine Reaktivierungen in den Daten gefunden.")
             
-            with tab4:
-                st.subheader("Original Churn Raten (Vertragsbasiert)")
+            with tab2:
+                st.subheader("Monats-Churn (Original v1 Logik)")
                 st.dataframe(results['v1_pivot'], use_container_width=True)
+                if len(results['v1_pivot']) > 0:
+                    st.line_chart(results['v1_pivot'])
             
-            with tab5:
-                st.subheader("Churn Events (True Churn)")
+            with tab3:
+                st.subheader("True Churn Events")
                 if len(results['churn_events']) > 0:
                     st.dataframe(results['churn_events'], use_container_width=True)
+                    
+                    # Verteilung nach Typ
+                    churn_types = results['churn_events']['Typ'].value_counts()
+                    st.subheader("Churn-Typen Verteilung")
+                    st.bar_chart(churn_types)
                 else:
                     st.info("Keine True Churn Events gefunden.")
+            
+            with tab4:
+                st.subheader("📊 Statistiken & Informationen")
                 
-                st.subheader("Reaktivierungs Events")
-                if len(results['reactivation_events']) > 0:
-                    st.dataframe(results['reactivation_events'], use_container_width=True)
-                else:
-                    st.info("Keine Reaktivierungen gefunden.")
+                total_customers = df['Kundennummer'].nunique()
+                reseller_count = df[df['Kundennummer'].isin(RESELLER_CUSTOMERS)]['Kundennummer'].nunique()
+                regular_customers = total_customers - reseller_count
+                total_reactivations = results['reactivations']['Anzahl Reaktivierungen'].sum() if len(results['reactivations']) > 0 else 0
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Gesamt Kunden", total_customers)
+                with col2:
+                    st.metric("Reguläre Kunden", regular_customers)
+                with col3:
+                    st.metric("Reseller", reseller_count)
+                with col4:
+                    st.metric("Reaktivierungen", total_reactivations)
+                
+                st.markdown("---")
+                st.markdown("### 🔍 Methodik")
+                st.markdown(f"""
+                **True Churn Berechnung:**
+                - **Reguläre Kunden:** Berücksichtigung von Reaktivierungen (Karenzzeit: {grace_period} Tage)
+                - **Reseller:** Verwenden Original v1-Logik (vertragsbasiert)
+                - **Jahres-Churn:** Kombination beider Methoden für realistische Gesamtrate
+                
+                **Vorteile:**
+                - Realistische Churn-Raten durch Reaktivierungs-Berücksichtigung
+                - Korrekte Behandlung von Reseller-Geschäftsmodellen
+                - Fokus auf geschäftsrelevante Jahres-KPIs
+                """)
 
     except Exception as e:
         st.error(f"Fehler beim Verarbeiten der Datei: {e}")
         st.exception(e)
 
-# Erklärung in der Sidebar
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📖 Erklärung")
-st.sidebar.markdown("""
-**Original Churn (v1):**
-Jeder Vertragsabschluss wird separat betrachtet.
-
-**True Churn (v2):**
-Berücksichtigt Kundenverlauf:
-- Reaktivierung ≤ 90 Tage = kein Churn
-- Reaktivierung > 90 Tage = Churn
-- Kein Folgevertrag = Churn
-
-**Vorteil:** Realistischere Churn-Raten für Geschäftsentscheidungen.
-""")
+# Footer
+st.markdown("---")
+st.markdown("*Churn-Analyse v2 with True Churn Logic & Reseller Handling*")
