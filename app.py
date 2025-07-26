@@ -364,18 +364,48 @@ if file:
         )
     
     if start_calculation:
-    try:
-        df = pd.read_excel(file)
-        
-        # Prüfe ob erforderliche Spalten vorhanden sind
-        required_cols = ['Abo', 'Produktkategorie', 'Produkt', 'Beginn', 'Ende', 'Kundennummer']
-        missing_cols = [col for col in required_cols if col not in df.columns]
-        
-        if missing_cols:
-            st.error(f"Fehlende Spalten: {', '.join(missing_cols)}")
-        else:
-            results = churn_auswerten_v2(df, grace_period)
+        # Progress und Spinner während Berechnung
+        with st.spinner("🔄 Analysiere Churn-Daten..."):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
             
+            try:
+                # Schritt 1: Daten laden
+                status_text.text("📊 Lade Excel-Daten...")
+                progress_bar.progress(10)
+                df = pd.read_excel(file)
+                
+                # Schritt 2: Validierung
+                status_text.text("✅ Validiere Datenspalten...")
+                progress_bar.progress(20)
+                required_cols = ['Abo', 'Produktkategorie', 'Produkt', 'Beginn', 'Ende', 'Kundennummer']
+                missing_cols = [col for col in required_cols if col not in df.columns]
+                
+                if missing_cols:
+                    st.error(f"❌ Fehlende Spalten: {', '.join(missing_cols)}")
+                    st.stop()
+                
+                # Schritt 3: Datenanalyse
+                status_text.text("🔍 Analysiere Kundenverlauf...")
+                progress_bar.progress(40)
+                results = churn_auswerten_v2(df, grace_period)
+                
+                # Schritt 4: Visualisierungen vorbereiten
+                status_text.text("📈 Erstelle Visualisierungen...")
+                progress_bar.progress(80)
+                
+                # Schritt 5: Fertig
+                status_text.text("✨ Analyse abgeschlossen!")
+                progress_bar.progress(100)
+                
+                # Kurz warten damit User den Abschluss sieht
+                import time
+                time.sleep(0.5)
+                
+                # Progress-Elemente entfernen
+                progress_bar.empty()
+                status_text.empty()
+
                 # 🎯 HAUPTFOKUS: Aktueller Jahres-Churn
                 st.header(f"🚨 Aktueller Jahres-Churn {pd.Timestamp.today().year}")
                 
@@ -509,7 +539,7 @@ if file:
             except Exception as e:
                 st.error(f"❌ Fehler beim Verarbeiten der Datei: {e}")
                 st.exception(e)
-    
+
 else:
     st.info("👆 Bitte laden Sie eine Excel-Datei hoch, um mit der Analyse zu beginnen.")
 
