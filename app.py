@@ -191,6 +191,135 @@ def calculate_yearly_churn(df: pd.DataFrame, churn_events: pd.DataFrame, start_y
     
     return pd.DataFrame(yearly_records)
 
+def calculate_waterfall_data(df: pd.DataFrame, churn_events: pd.DataFrame, year: int):
+    """
+    Berechnet Daten für Waterfall-Chart: Startkunden, Neukunden, Churn, Endkunden
+    """
+    y_start = pd.Timestamp(f"{year}-01-01")
+    y_end = pd.Timestamp(f"{year}-12-31") if year < pd.Timestamp.today().year else pd.Timestamp.today()
+    
+    waterfall_data = []
+    
+    for group in RELEVANT_GROUPS:
+        group_df = df[df['ProductGroup'] == group]
+        
+        if len(group_df) == 0:
+            continue
+            
+        # Startkunden (Aktiv zu Jahresbeginn)
+        start_customers = group_df[
+            (group_df['Beginn'] < y_start) & 
+            ((group_df['Ende'].isna()) | (group_df['Ende'] >= y_start))
+        ]['Kundennummer'].nunique()
+        
+        # Neukunden während des Jahres
+        new_customers = group_df[
+            (group_df['Beginn'] >= y_start) & 
+            (group_df['Beginn'] <= y_end)
+        ]['Kundennummer'].nunique()
+        
+        # Churned Kunden
+        churned_customers = len(set(churn_events[
+            (churn_events['ProductGroup'] == group) &
+            (churn_events['ChurnDatum'] >= y_start) & 
+            (churn_events['ChurnDatum'] <= y_end)
+        ]['Kundennummer'].unique()))
+        
+        # Reseller separat
+        reseller_df = group_df[group_df['Kundennummer'].isin(RESELLER_CUSTOMERS)]
+        reseller_churned = len(reseller_df[
+            (reseller_df['Ende'] >= y_start) & 
+            (reseller_df['Ende'] <= y_end)
+        ])
+        
+        total_churned = churned_customers + reseller_churned
+        
+        # Endkunden
+        end_customers = start_customers + new_customers - total_churned
+        
+        waterfall_data.append({
+            'Gruppe': group,
+            'Start': start_customers,
+            'Neukunden': new_customers,
+            'Churn': -total_churned,  # Negativ für Waterfall
+            'Ende': end_customers
+        })
+    
+    return pd.DataFrame(waterfall_data)
+
+def analyze_sales_performance(df: pd.DataFrame, churn_events: pd.DataFrame):
+    """
+    Analysiert Churn-Performance nach Verkäufern
+    """
+    # Sicherstellen dass die Spalte existiert
+    if 'Zugewiesen an' not in df.columns:
+        return pd.DataFrame(), pd.DataFrame()
+    
+    # Bereinige Verkäufer-Namen
+    df['Verkäufer'] = df['Zugewiesen an'].fillna('Nicht zugewiesen').str.strip()
+    
+    # Aktuelles Jahr
+    current_year = pd.Timestamp.today().year
+    y_start = pd.Timestamp(f"{current_year}-01-01")
+    
+    # Performance nach Verkäufer und Produktgruppe
+    performance_data = []
+    
+    for verkäufer in df['Verkäufer'].unique():
+        v_df = df[df['Verkäufer'] == verkäufer]
+        
+        for group in RELEVANT_GROUPS:
+            vg_df = v_df[v_df['ProductGroup'] == group]
+            
+            if len(vg_df) == 0:
+                continue
+            
+            # Aktive Kunden dieses Verkäufers
+            active = vg_df[
+                (vg_df['Beginn'] < y_start) & 
+                ((vg_df['Ende'].isna()) | (vg_df['Ende'] >= y_start))
+            ]
+            active_customers = active['Kundennummer'].nunique()
+            
+            # Churned Kunden dieses Verkäufers
+            churned_customers = vg_df[
+                (vg_df['Ende'] >= y_start)
+            ]['Kundennummer'].nunique()
+            
+            # Neukunden dieses Verkäufers
+            new_customers = vg_df[
+                vg_df['Beginn'] >= y_start
+            ]['Kundennummer'].nunique()
+            
+            churn_rate = (churned_customers / active_customers * 100) if active_customers > 0 else 0
+            
+            performance_data.append({
+                'Verkäufer': verkäufer,
+                'Produktgruppe': group,
+                'Aktive Kunden': active_customers,
+                'Neukunden': new_customers,
+                'Verlorene Kunden': churned_customers,
+                'Churn Rate (%)': round(churn_rate, 1)
+            })
+    
+    performance_df = pd.DataFrame(performance_data)
+    
+    # Zusammenfassung pro Verkäufer
+    if len(performance_df) > 0:
+        summary = performance_df.groupby('Verkäufer').agg({
+            'Aktive Kunden': 'sum',
+            'Neukunden': 'sum',
+            'Verlorene Kunden': 'sum'
+        }).reset_index()
+        summary['Churn Rate (%)'] = round(
+            (summary['Verlorene Kunden'] / summary['Aktive Kunden'] * 100).fillna(0), 1
+        )
+        summary = summary.sort_values('Churn Rate (%)', ascending=True)
+    else:
+        summary = pd.DataFrame()
+    
+    return performance_df, summary
+
 def calculate_current_year_churn(df: pd.DataFrame, churn_events: pd.DataFrame):
     """
     Berechnet aktuellen Jahres-Churn (laufendes Jahr)
@@ -276,6 +405,12 @@ def churn_auswerten_v2(df: pd.DataFrame, grace_period_days: int = 90):
     yearly_churn = calculate_yearly_churn(df, churn_events, start_year=2020)
     current_year_churn = calculate_current_year_churn(df, churn_events)
     
+    # Waterfall-Daten für aktuelles Jahr
+    waterfall_data = calculate_waterfall_data(df, churn_events, pd.Timestamp.today().year)
+    
+    # Verkäufer-Performance
+    sales_performance, sales_summary = analyze_sales_performance(df, churn_events)
+    
     # Monatliche Daten für andere Auswertungen
     months = last_12_full_months(pd.Timestamp.today())
     v1_records = []
@@ -308,7 +443,11 @@ def churn_auswerten_v2(df: pd.DataFrame, grace_period_days: int = 90):
         'v1_pivot': df_v1_pivot,
         'reactivations': react_stats,
         'churn_events': churn_events,
-        'reactivation_events': reactivations
+        'reactivation_events': reactivations,
+        'waterfall_data': waterfall_data,
+        'sales_performance': sales_performance,
+        'sales_summary': sales_summary,
+        'df': df  # Für Verkäufer-Filter
     }
 
 # Streamlit App
@@ -326,6 +465,9 @@ grace_period = st.sidebar.slider(
     step=15,
     help="Kunden die innerhalb dieser Zeit das gleiche Produkt neu abschließen gelten nicht als Churn"
 )
+
+# Verkäufer-Filter (wird später befüllt)
+selected_salesperson = None
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🏢 Reseller (verwenden v1-Logik)")
@@ -465,7 +607,9 @@ if file:
                 
                 # Weitere Auswertungen in Tabs
                 st.header("📊 Weitere Auswertungen")
-                tab1, tab2, tab3, tab4 = st.tabs([
+                tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+                    "💧 Waterfall Chart",
+                    "👥 Verkäufer-Performance",
                     "🔄 Reaktivierungen", 
                     "📋 Monats-Churn (v1)",
                     "🔍 True Churn Events",
@@ -473,7 +617,258 @@ if file:
                 ])
                 
                 with tab1:
-                    st.subheader("Reaktivierungs-Statistiken")
+                    st.subheader(f"💧 Kunden-Waterfall {pd.Timestamp.today().year}")
+                    
+                    waterfall = results['waterfall_data']
+                    if len(waterfall) > 0:
+                        # Produktgruppe wählen
+                        selected_group = st.selectbox(
+                            "Produktgruppe wählen:",
+                            options=['Alle'] + list(waterfall['Gruppe'].unique()),
+                            key="waterfall_group"
+                        )
+                        
+                        if selected_group == 'Alle':
+                            # Aggregierte Daten für alle Gruppen
+                            agg_data = waterfall.groupby('Gruppe').sum().sum()
+                            
+                            # Waterfall Chart mit Plotly
+                            fig = go.Figure(go.Waterfall(
+                                name="Kundenentwicklung",
+                                orientation="v",
+                                measure=["absolute", "relative", "relative", "total"],
+                                x=["Start " + str(pd.Timestamp.today().year), "Neukunden", "Churn", "Ende"],
+                                text=[f"+{int(agg_data['Start'])}", 
+                                      f"+{int(agg_data['Neukunden'])}", 
+                                      f"{int(agg_data['Churn'])}", 
+                                      f"{int(agg_data['Ende'])}"],
+                                y=[agg_data['Start'], agg_data['Neukunden'], agg_data['Churn'], agg_data['Ende']],
+                                connector={"line": {"color": "rgb(63, 63, 63)"}},
+                                increasing={"marker": {"color": "green"}},
+                                decreasing={"marker": {"color": "red"}},
+                                totals={"marker": {"color": "blue"}}
+                            ))
+                            
+                            fig.update_layout(
+                                title=f"Kundenentwicklung Alle Gruppen - {pd.Timestamp.today().year}",
+                                showlegend=False,
+                                height=500
+                            )
+                            
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            # Daten für einzelne Gruppe
+                            group_data = waterfall[waterfall['Gruppe'] == selected_group].iloc[0]
+                            
+                            fig = go.Figure(go.Waterfall(
+                                name="Kundenentwicklung",
+                                orientation="v",
+                                measure=["absolute", "relative", "relative", "total"],
+                                x=["Start " + str(pd.Timestamp.today().year), "Neukunden", "Churn", "Ende"],
+                                text=[f"+{int(group_data['Start'])}", 
+                                      f"+{int(group_data['Neukunden'])}", 
+                                      f"{int(group_data['Churn'])}", 
+                                      f"{int(group_data['Ende'])}"],
+                                y=[group_data['Start'], group_data['Neukunden'], group_data['Churn'], group_data['Ende']],
+                                connector={"line": {"color": "rgb(63, 63, 63)"}},
+                                increasing={"marker": {"color": "green"}},
+                                decreasing={"marker": {"color": "red"}},
+                                totals={"marker": {"color": "blue"}}
+                            ))
+                            
+                            fig.update_layout(
+                                title=f"Kundenentwicklung {selected_group} - {pd.Timestamp.today().year}",
+                                showlegend=False,
+                                height=500
+                            )
+                            
+                            st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Detailtabelle
+                        st.subheader("Waterfall Details")
+                        st.dataframe(waterfall, use_container_width=True)
+                    else:
+                        st.info("Keine Waterfall-Daten verfügbar")
+                
+                with tab2:
+                    st.subheader("👥 Verkäufer-Performance Analyse")
+                    
+                    if 'Zugewiesen an' in df.columns:
+                        # Verkäufer-Filter in Sidebar hinzufügen
+                        df['Verkäufer'] = df['Zugewiesen an'].fillna('Nicht zugewiesen').str.strip()
+                        verkäufer_liste = sorted(df['Verkäufer'].unique())
+                        
+                        # Filter-Optionen
+                        col1, col2 = st.columns([1, 3])
+                        with col1:
+                            filter_type = st.radio(
+                                "Ansicht:",
+                                ["Alle Verkäufer", "Einzelner Verkäufer"],
+                                key="sales_filter_type"
+                            )
+                        
+                        with col2:
+                            if filter_type == "Einzelner Verkäufer":
+                                selected_salesperson = st.selectbox(
+                                    "Verkäufer auswählen:",
+                                    options=verkäufer_liste,
+                                    key="salesperson_select"
+                                )
+                        
+                        # Performance-Daten
+                        perf_data = results['sales_performance']
+                        summary = results['sales_summary']
+                        
+                        if len(perf_data) > 0:
+                            if filter_type == "Einzelner Verkäufer" and selected_salesperson:
+                                # Einzelner Verkäufer
+                                st.subheader(f"Performance: {selected_salesperson}")
+                                
+                                seller_data = perf_data[perf_data['Verkäufer'] == selected_salesperson]
+                                
+                                if len(seller_data) > 0:
+                                    # Metrics
+                                    total_active = seller_data['Aktive Kunden'].sum()
+                                    total_new = seller_data['Neukunden'].sum()
+                                    total_lost = seller_data['Verlorene Kunden'].sum()
+                                    avg_churn = (total_lost / total_active * 100) if total_active > 0 else 0
+                                    
+                                    col1, col2, col3, col4 = st.columns(4)
+                                    with col1:
+                                        st.metric("Aktive Kunden", total_active)
+                                    with col2:
+                                        st.metric("Neukunden", total_new)
+                                    with col3:
+                                        st.metric("Verlorene Kunden", total_lost)
+                                    with col4:
+                                        st.metric("Churn Rate", f"{avg_churn:.1f}%")
+                                    
+                                    # Detail-Tabelle
+                                    st.subheader("Performance nach Produktgruppe")
+                                    st.dataframe(
+                                        seller_data[['Produktgruppe', 'Aktive Kunden', 'Neukunden', 
+                                                    'Verlorene Kunden', 'Churn Rate (%)']],
+                                        use_container_width=True
+                                    )
+                                    
+                                    # Chart
+                                    fig = go.Figure()
+                                    fig.add_trace(go.Bar(
+                                        name='Aktive Kunden',
+                                        x=seller_data['Produktgruppe'],
+                                        y=seller_data['Aktive Kunden'],
+                                        marker_color='blue'
+                                    ))
+                                    fig.add_trace(go.Bar(
+                                        name='Verlorene Kunden',
+                                        x=seller_data['Produktgruppe'],
+                                        y=seller_data['Verlorene Kunden'],
+                                        marker_color='red'
+                                    ))
+                                    fig.update_layout(
+                                        title=f"Kunden-Übersicht {selected_salesperson}",
+                                        barmode='group',
+                                        height=400
+                                    )
+                                    st.plotly_chart(fig, use_container_width=True)
+                                else:
+                                    st.info(f"Keine Daten für {selected_salesperson} gefunden")
+                            
+                            else:
+                                # Alle Verkäufer - Übersicht
+                                st.subheader("Top/Bottom Performer")
+                                
+                                if len(summary) > 0:
+                                    # Top 5 Performer (niedrigster Churn)
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        st.success("🏆 Top 5 Performer (niedrigster Churn)")
+                                        top5 = summary.head(5)[['Verkäufer', 'Aktive Kunden', 'Churn Rate (%)']]
+                                        st.dataframe(top5, use_container_width=True, hide_index=True)
+                                    
+                                    with col2:
+                                        st.error("⚠️ Bottom 5 Performer (höchster Churn)")
+                                        bottom5 = summary.tail(5)[['Verkäufer', 'Aktive Kunden', 'Churn Rate (%)']]
+                                        st.dataframe(bottom5, use_container_width=True, hide_index=True)
+                                    
+                                    # Gesamt-Übersicht Chart
+                                    st.subheader("Churn-Rate nach Verkäufer")
+                                    
+                                    # Nur Verkäufer mit mindestens 5 aktiven Kunden für bessere Übersicht
+                                    relevant_sellers = summary[summary['Aktive Kunden'] >= 5].sort_values('Churn Rate (%)')
+                                    
+                                    if len(relevant_sellers) > 0:
+                                        fig = go.Figure()
+                                        fig.add_trace(go.Bar(
+                                            x=relevant_sellers['Churn Rate (%)'],
+                                            y=relevant_sellers['Verkäufer'],
+                                            orientation='h',
+                                            marker_color=relevant_sellers['Churn Rate (%)'],
+                                            marker_colorscale='RdYlGn_r',
+                                            text=relevant_sellers['Churn Rate (%)'].apply(lambda x: f'{x:.1f}%'),
+                                            textposition='outside'
+                                        ))
+                                        fig.update_layout(
+                                            title="Churn-Rate nach Verkäufer (min. 5 aktive Kunden)",
+                                            xaxis_title="Churn Rate (%)",
+                                            yaxis_title="Verkäufer",
+                                            height=max(400, len(relevant_sellers) * 25),
+                                            showlegend=False
+                                        )
+                                        st.plotly_chart(fig, use_container_width=True)
+                                    
+                                    # Produktgruppen-Matrix
+                                    st.subheader("Performance-Matrix: Verkäufer × Produktgruppe")
+                                    
+                                    # Pivot-Tabelle erstellen
+                                    pivot_churn = perf_data.pivot_table(
+                                        index='Verkäufer',
+                                        columns='Produktgruppe',
+                                        values='Churn Rate (%)',
+                                        fill_value=0
+                                    )
+                                    
+                                    # Heatmap
+                                    fig = go.Figure(data=go.Heatmap(
+                                        z=pivot_churn.values,
+                                        x=pivot_churn.columns,
+                                        y=pivot_churn.index,
+                                        colorscale='RdYlGn_r',
+                                        text=pivot_churn.values,
+                                        texttemplate='%{text:.1f}%',
+                                        textfont={"size": 10},
+                                        colorbar=dict(title="Churn Rate (%)")
+                                    ))
+                                    
+                                    fig.update_layout(
+                                        title="Churn-Rate Heatmap",
+                                        height=max(400, len(pivot_churn.index) * 20),
+                                        xaxis_title="Produktgruppe",
+                                        yaxis_title="Verkäufer"
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                    
+                                    # Vollständige Tabelle
+                                    with st.expander("📊 Vollständige Verkäufer-Statistik"):
+                                        st.dataframe(summary, use_container_width=True)
+                                        
+                                        # Download-Button
+                                        csv = summary.to_csv(index=False)
+                                        st.download_button(
+                                            label="📥 Als CSV exportieren",
+                                            data=csv,
+                                            file_name=f"verkäufer_performance_{pd.Timestamp.today().strftime('%Y%m%d')}.csv",
+                                            mime="text/csv"
+                                        )
+                        else:
+                            st.info("Keine Verkäufer-Daten verfügbar")
+                    else:
+                        st.warning("⚠️ Spalte 'Zugewiesen an' nicht in den Daten gefunden")
+                
+                with tab3:
+                    st.subheader("🔄 Reaktivierungs-Statistiken")
                     if len(results['reactivations']) > 0:
                         st.dataframe(results['reactivations'], use_container_width=True)
                         
@@ -486,14 +881,14 @@ if file:
                     else:
                         st.info("Keine Reaktivierungen in den Daten gefunden.")
                 
-                with tab2:
-                    st.subheader("Monats-Churn (Original v1 Logik)")
+                with tab4:
+                    st.subheader("📋 Monats-Churn (Original v1 Logik)")
                     st.dataframe(results['v1_pivot'], use_container_width=True)
                     if len(results['v1_pivot']) > 0:
                         st.line_chart(results['v1_pivot'])
                 
-                with tab3:
-                    st.subheader("True Churn Events")
+                with tab5:
+                    st.subheader("🔍 True Churn Events")
                     if len(results['churn_events']) > 0:
                         st.dataframe(results['churn_events'], use_container_width=True)
                         
@@ -504,7 +899,7 @@ if file:
                     else:
                         st.info("Keine True Churn Events gefunden.")
                 
-                with tab4:
+                with tab6:
                     st.subheader("📊 Statistiken & Informationen")
                     
                     total_customers = df['Kundennummer'].nunique()
@@ -534,6 +929,7 @@ if file:
                     - Realistische Churn-Raten durch Reaktivierungs-Berücksichtigung
                     - Korrekte Behandlung von Reseller-Geschäftsmodellen
                     - Fokus auf geschäftsrelevante Jahres-KPIs
+                    - Verkäufer-Performance Tracking für gezieltes Coaching
                     """)
 
             except Exception as e:
@@ -545,4 +941,4 @@ else:
 
 # Footer
 st.markdown("---")
-st.markdown("*Churn-Analyse v2 with True Churn Logic & Reseller Handling*")
+st.markdown("*Churn-Analyse v2 with True Churn Logic, Reseller Handling & Sales Performance Tracking*")
