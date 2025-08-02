@@ -457,47 +457,6 @@ if file:
                     )
                     
                     st.plotly_chart(fig, use_container_width=True)
-# ─────────────────────────────────────────────────────────────
-# ▶️ Waterfall-Diagramm zur Herleitung des Churn
-# ─────────────────────────────────────────────────────────────
-import plotly.graph_objects as go
-
-# Annahme: df_summary existiert und hat schon aktive_vorjahr, aktive_aktuell, kuendigungen
-aktive_vorjahr = int(df_summary["aktive_vorjahr"].sum())
-kuendigungen   = int(df_summary["kuendigungen"].sum())
-aktive_aktuell = int(df_summary["aktive_aktuell"].sum())
-# Berechnung der neuen Abschlüsse, falls nicht separat vorliegen
-neu            = aktive_aktuell + kuendigungen - aktive_vorjahr
-
-def get_waterfall_chart(av, neu, kd, aa):
-    fig = go.Figure(go.Waterfall(
-        measure=["relative","relative","relative","total"],
-        x=["Aktive Vorjahr","Neue Abschlüsse","Kündigungen","Aktive aktuell"],
-        y=[av, neu, -kd, 0],
-        text=[f"{av:,}", f"+{neu:,}", f"-{kd:,}", f"{aa:,}"],
-        increasing={"marker":{"color":"#3CB371"}},
-        decreasing={"marker":{"color":"#FF6347"}},
-        totals={"marker":{"color":"#1E90FF"}},
-    ))
-    fig.update_layout(title="Churn-Herleitung (Waterfall)",
-                      showlegend=False,
-                      margin=dict(t=50,l=0,r=0,b=0))
-    return fig
-
-with st.container():
-    st.subheader("🔄 Herleitung der Churn-Berechnung")
-    col1, col2 = st.columns([1,1])
-    with col1:
-        st.markdown(
-            f"**Aktive Vorjahr:** {aktive_vorjahr:,}  \n"
-            f"**+ Neue Abschlüsse:** {neu:,}  \n"
-            f"**− Kündigungen:** {kuendigungen:,}  \n"
-            f"**= Aktive aktuell:** {aktive_aktuell:,}"
-        )
-    with col2:
-        st.plotly_chart(get_waterfall_chart(
-            aktive_vorjahr, neu, kuendigungen, aktive_aktuell
-        ), use_container_width=True)
                     
                     # Jahres-Tabelle
                     st.subheader("Jahres-Churn Tabelle")
