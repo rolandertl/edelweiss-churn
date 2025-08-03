@@ -450,7 +450,6 @@ def create_sales_performance_view(perf_data, summary, filter_type, selected_sale
                 textfont={"size": 10},
                 colorbar=dict(
                     title="Churn %",
-                    titleside="right",
                     tickmode="linear",
                     tick0=0,
                     dtick=10
@@ -508,30 +507,38 @@ def main():
         
         st.markdown("---")
         
-        # Verkäufer-Filter
+        # Verkäufer-Filter aus GitHub laden
         st.markdown("### 👥 Verkäufer-Filter")
-        
-        # Option 1: Textdatei hochladen
-        seller_file = st.file_uploader(
-            "📄 Verkäufer-Liste hochladen",
-            type=["txt"],
-            help="Textdatei mit einem Verkäufernamen pro Zeile"
-        )
         
         selected_sellers = None
         available_sellers = []
         
-        if seller_file:
-            try:
-                seller_content = seller_file.read().decode('utf-8')
-                # Parse Verkäufer aus Datei (ignoriere Kommentare)
-                selected_sellers = [
-                    line.strip() for line in seller_content.splitlines()
-                    if line.strip() and not line.strip().startswith('#')
-                ]
-                st.success(f"✅ {len(selected_sellers)} Verkäufer geladen")
-            except Exception as e:
-                st.error(f"Fehler beim Lesen der Datei: {e}")
+        # Versuche verkaeufer.txt aus dem Repository zu laden
+        try:
+            import os
+            if os.path.exists('verkaeufer.txt'):
+                with open('verkaeufer.txt', 'r', encoding='utf-8') as f:
+                    seller_content = f.read()
+                    # Parse Verkäufer aus Datei (ignoriere Kommentare)
+                    selected_sellers = [
+                        line.strip() for line in seller_content.splitlines()
+                        if line.strip() and not line.strip().startswith('#')
+                    ]
+                    st.success(f"✅ {len(selected_sellers)} Verkäufer aus verkaeufer.txt geladen")
+            else:
+                st.info("📝 Keine verkaeufer.txt gefunden - verwende alle Verkäufer")
+                st.markdown("""
+                **Tipp:** Erstelle eine `verkaeufer.txt` im Repository mit:
+                ```
+                # Relevante Verkäufer
+                Max Mustermann
+                Anna Schmidt
+                # Externe (auskommentiert):
+                # Peter External
+                ```
+                """)
+        except Exception as e:
+            st.warning(f"Fehler beim Lesen der verkaeufer.txt: {e}")
         
         st.markdown("---")
         
@@ -581,24 +588,51 @@ def main():
                 df_temp['Verkäufer'] = df_temp['Zugewiesen an'].fillna('Nicht zugewiesen').str.strip()
                 available_sellers = sorted(df_temp['Verkäufer'].unique())
                 
-                # Option 2: Multiselect wenn keine Datei geladen
-                if not seller_file and available_sellers:
+                # Multiselect wenn keine verkaeufer.txt geladen wurde
+                if not selected_sellers and available_sellers:
                     st.markdown("### 🎯 Verkäufer auswählen")
-                    st.info("💡 Tipp: Laden Sie eine verkaeufer.txt Datei in der Sidebar für vordefinierte Auswahl")
                     
-                    # Vorauswahl: Alle außer "Nicht zugewiesen" und bekannte externe
-                    exclude_keywords = ['extern', 'ehemalig', 'freelance', 'praktikant', 'nicht zugewiesen']
-                    default_selection = [
-                        s for s in available_sellers 
-                        if not any(keyword in s.lower() for keyword in exclude_keywords)
-                    ]
+                    # Checkbox für schnelle Filterung
+                    exclude_external = st.checkbox(
+                        "Externe/Ehemalige automatisch ausschließen",
+                        value=True,
+                        help="Filtert Verkäufer mit 'extern', 'ehemalig', 'freelance', 'praktikant' im Namen"
+                    )
+                    
+                    if exclude_external:
+                        exclude_keywords = ['extern', 'ehemalig', 'freelance', 'praktikant', 'nicht zugewiesen']
+                        default_selection = [
+                            s for s in available_sellers 
+                            if not any(keyword in s.lower() for keyword in exclude_keywords)
+                        ]
+                    else:
+                        default_selection = available_sellers
                     
                     selected_sellers = st.multiselect(
                         "Wählen Sie die zu analysierenden Verkäufer:",
                         options=available_sellers,
                         default=default_selection,
-                        help="Externe und ehemalige Mitarbeiter können hier ausgeschlossen werden"
+                        help="Wählen Sie die Verkäufer aus, die in der Analyse berücksichtigt werden sollen"
                     )
+                    
+                    # Option zum Speichern der Auswahl
+                    if st.button("💾 Auswahl als Standard speichern"):
+                        try:
+                            with open('verkaeufer.txt', 'w', encoding='utf-8') as f:
+                                f.write("# Relevante Verkäufer für Churn-Analyse\n")
+                                f.write("# Automatisch generiert\n\n")
+                                for seller in selected_sellers:
+                                    f.write(f"{seller}\n")
+                                
+                                # Nicht ausgewählte als Kommentar
+                                f.write("\n# Ausgeschlossene Verkäufer:\n")
+                                for seller in available_sellers:
+                                    if seller not in selected_sellers:
+                                        f.write(f"# {seller}\n")
+                            
+                            st.success("✅ Auswahl wurde in verkaeufer.txt gespeichert")
+                        except Exception as e:
+                            st.error(f"Fehler beim Speichern: {e}")
         except:
             pass
         
