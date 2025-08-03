@@ -8,7 +8,6 @@ Gerhard Hillebrand
 Harald Karbon
 Maria Katharina Friess
 Nadine Girardelli
-Roland Ertl
 Rouel Stecher
 Stefan Streli
 Thomas Kröll
@@ -23,6 +22,7 @@ Veronika Haladova
 # Brigitte Tschenett
 # Julia Trinkler
 # Julia Renner
+# Roland Ertl
 
 # Dennis Grünwald
 # Wolfgang Piller
