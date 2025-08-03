@@ -636,191 +636,189 @@ def main():
         except:
             pass
         
-        # Start-Button
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("🚀 Analyse starten", use_container_width=True):
-                with st.spinner("🔄 Analysiere Daten..."):
-                    try:
-                        # Daten laden und verarbeiten
-                        df = pd.read_excel(file)
-                        
-                        # Validierung
-                        required_cols = ['Abo', 'Produktkategorie', 'Produkt', 'Beginn', 'Ende', 'Kundennummer']
-                        missing_cols = [col for col in required_cols if col not in df.columns]
-                        
-                        if missing_cols:
-                            st.error(f"❌ Fehlende Spalten: {', '.join(missing_cols)}")
-                            st.stop()
-                        
-                        # Info über gefilterte Verkäufer
-                        if selected_sellers:
-                            st.info(f"🎯 Analyse für {len(selected_sellers)} ausgewählte Verkäufer")
-                        
-                        # Analyse durchführen
-                        results = process_data(df, grace_period, selected_sellers)
-                        
-                        # HAUPTMETRICS
-                        st.markdown("## 📊 Aktuelle Jahresübersicht")
-                        
-                        current_churn = results['current_year_churn']
-                        if len(current_churn) > 0:
-                            # Metrics Cards
-                            cols = st.columns(len(current_churn))
-                            for i, (_, row) in enumerate(current_churn.iterrows()):
-                                with cols[i]:
-                                    color = "success" if row['Churn Rate (%)'] < 10 else "warning" if row['Churn Rate (%)'] < 20 else "danger"
-                                    st.metric(
-                                        row['Produktgruppe'],
-                                        f"{row['Churn Rate (%)']}%",
-                                        delta=f"{row['Verluste']} von {row['Aktive Kunden']}",
-                                        delta_color="inverse"
-                                    )
-                        
-                        # TABS für verschiedene Analysen
-                        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-                            "📈 Trends",
-                            "💧 Waterfall",
-                            "👥 Verkäufer",
-                            "🔄 Reaktivierungen",
-                            "📊 Details"
-                        ])
-                        
-                        with tab1:
-                            st.markdown("### 📈 Jahres-Trend Analyse")
-                            
-                            yearly_data = results['yearly_churn']
-                            if len(yearly_data) > 0:
-                                yearly_pivot = yearly_data.pivot(index='Jahr', columns='Gruppe', values='JahresChurn (%)').fillna(0)
-                                
-                                fig = go.Figure()
-                                colors = px.colors.qualitative.Set2
-                                
-                                for i, gruppe in enumerate(yearly_pivot.columns):
-                                    fig.add_trace(go.Scatter(
-                                        x=yearly_pivot.index,
-                                        y=yearly_pivot[gruppe],
-                                        mode='lines+markers',
-                                        name=gruppe,
-                                        line=dict(color=colors[i % len(colors)], width=3),
-                                        marker=dict(size=10),
-                                        hovertemplate='<b>%{fullData.name}</b><br>' +
-                                                      'Jahr: %{x}<br>' +
-                                                      'Churn: %{y:.1f}%<br>' +
-                                                      '<extra></extra>'
-                                    ))
-                                
-                                fig.update_layout(
-                                    title="Churn-Entwicklung 2020 bis heute",
-                                    xaxis_title="Jahr",
-                                    yaxis_title="Churn Rate (%)",
-                                    hovermode='x unified',
-                                    height=500,
-                                    plot_bgcolor='rgba(0,0,0,0)',
-                                    paper_bgcolor='rgba(0,0,0,0)',
-                                    font=dict(size=14),
-                                    legend=dict(
-                                        orientation="h",
-                                        yanchor="bottom",
-                                        y=-0.2,
-                                        xanchor="center",
-                                        x=0.5
-                                    )
+        # Start-Button - volle Breite ohne Spalten
+        if st.button("🚀 Analyse starten", use_container_width=True, type="primary"):
+            with st.spinner("🔄 Analysiere Daten..."):
+                try:
+                    # Daten laden und verarbeiten
+                    df = pd.read_excel(file)
+                    
+                    # Validierung
+                    required_cols = ['Abo', 'Produktkategorie', 'Produkt', 'Beginn', 'Ende', 'Kundennummer']
+                    missing_cols = [col for col in required_cols if col not in df.columns]
+                    
+                    if missing_cols:
+                        st.error(f"❌ Fehlende Spalten: {', '.join(missing_cols)}")
+                        st.stop()
+                    
+                    # Info über gefilterte Verkäufer
+                    if selected_sellers:
+                        st.info(f"🎯 Analyse für {len(selected_sellers)} ausgewählte Verkäufer")
+                    
+                    # Analyse durchführen
+                    results = process_data(df, grace_period, selected_sellers)
+                    
+                    # HAUPTMETRICS
+                    st.markdown("## 📊 Aktuelle Jahresübersicht")
+                    
+                    current_churn = results['current_year_churn']
+                    if len(current_churn) > 0:
+                        # Metrics Cards
+                        cols = st.columns(len(current_churn))
+                        for i, (_, row) in enumerate(current_churn.iterrows()):
+                            with cols[i]:
+                                color = "success" if row['Churn Rate (%)'] < 10 else "warning" if row['Churn Rate (%)'] < 20 else "danger"
+                                st.metric(
+                                    row['Produktgruppe'],
+                                    f"{row['Churn Rate (%)']}%",
+                                    delta=f"{row['Verluste']} von {row['Aktive Kunden']}",
+                                    delta_color="inverse"
                                 )
-                                
-                                st.plotly_chart(fig, use_container_width=True)
+                    
+                    # TABS für verschiedene Analysen
+                    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                        "📈 Trends",
+                        "💧 Waterfall",
+                        "👥 Verkäufer",
+                        "🔄 Reaktivierungen",
+                        "📊 Details"
+                    ])
+                    
+                    with tab1:
+                        st.markdown("### 📈 Jahres-Trend Analyse")
                         
-                        with tab2:
-                            st.markdown("### 💧 Kundenentwicklung Waterfall")
+                        yearly_data = results['yearly_churn']
+                        if len(yearly_data) > 0:
+                            yearly_pivot = yearly_data.pivot(index='Jahr', columns='Gruppe', values='JahresChurn (%)').fillna(0)
                             
-                            waterfall = results['waterfall_data']
-                            if len(waterfall) > 0:
-                                selected_group = st.selectbox(
-                                    "Produktgruppe auswählen:",
-                                    options=['Alle'] + list(waterfall['Gruppe'].unique())
+                            fig = go.Figure()
+                            colors = px.colors.qualitative.Set2
+                            
+                            for i, gruppe in enumerate(yearly_pivot.columns):
+                                fig.add_trace(go.Scatter(
+                                    x=yearly_pivot.index,
+                                    y=yearly_pivot[gruppe],
+                                    mode='lines+markers',
+                                    name=gruppe,
+                                    line=dict(color=colors[i % len(colors)], width=3),
+                                    marker=dict(size=10),
+                                    hovertemplate='<b>%{fullData.name}</b><br>' +
+                                                  'Jahr: %{x}<br>' +
+                                                  'Churn: %{y:.1f}%<br>' +
+                                                  '<extra></extra>'
+                                ))
+                            
+                            fig.update_layout(
+                                title="Churn-Entwicklung 2020 bis heute",
+                                xaxis_title="Jahr",
+                                yaxis_title="Churn Rate (%)",
+                                hovermode='x unified',
+                                height=500,
+                                plot_bgcolor='rgba(0,0,0,0)',
+                                paper_bgcolor='rgba(0,0,0,0)',
+                                font=dict(size=14),
+                                legend=dict(
+                                    orientation="h",
+                                    yanchor="bottom",
+                                    y=-0.2,
+                                    xanchor="center",
+                                    x=0.5
                                 )
-                                
-                                fig = create_waterfall_chart(waterfall, selected_group)
-                                st.plotly_chart(fig, use_container_width=True)
-                                
-                                # Detail-Tabelle
-                                with st.expander("📋 Waterfall Details"):
-                                    st.dataframe(waterfall, use_container_width=True, hide_index=True)
-                        
-                        with tab3:
-                            st.markdown("### 👥 Verkäufer-Performance")
-                            
-                            if selected_sellers:
-                                st.success(f"✅ Zeige Daten für {len(selected_sellers)} ausgewählte Verkäufer")
-                            
-                            if 'Zugewiesen an' in df.columns:
-                                col1, col2 = st.columns([1, 3])
-                                with col1:
-                                    filter_type = st.radio(
-                                        "Ansicht:",
-                                        ["Alle Verkäufer", "Einzelner Verkäufer"]
-                                    )
-                                
-                                with col2:
-                                    if filter_type == "Einzelner Verkäufer":
-                                        # Nur ausgewählte Verkäufer zur Auswahl
-                                        seller_options = selected_sellers if selected_sellers else sorted(df['Verkäufer'].unique())
-                                        selected_salesperson = st.selectbox(
-                                            "Verkäufer:",
-                                            options=seller_options
-                                        )
-                                    else:
-                                        selected_salesperson = None
-                                
-                                create_sales_performance_view(
-                                    results['sales_performance'],
-                                    results['sales_summary'],
-                                    filter_type,
-                                    selected_salesperson
-                                )
-                            else:
-                                st.warning("⚠️ Spalte 'Zugewiesen an' nicht gefunden - Verkäufer-Analyse nicht möglich")
-                        
-                        with tab4:
-                            st.markdown("### 🔄 Reaktivierungen")
-                            
-                            if len(results['reactivations']) > 0:
-                                st.dataframe(
-                                    results['reactivations'].style.format({
-                                        'Ø Pause (Tage)': '{:.0f}'
-                                    }),
-                                    use_container_width=True,
-                                    hide_index=True
-                                )
-                            else:
-                                st.info("Keine Reaktivierungen gefunden")
-                        
-                        with tab5:
-                            st.markdown("### 📊 Detailanalysen")
-                            
-                            # Monatlicher Churn
-                            st.markdown("#### Monatlicher Churn (letzte 12 Monate)")
-                            st.dataframe(
-                                results['monthly_pivot'].style.format('{:.1f}%'),
-                                use_container_width=True
                             )
                             
-                            # Statistiken
-                            st.markdown("#### Gesamtstatistiken")
-                            total_customers = df['Kundennummer'].nunique()
-                            reseller_count = len([k for k in df['Kundennummer'].unique() if k in RESELLER_CUSTOMERS])
-                            
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Gesamt Kunden", total_customers)
-                            with col2:
-                                st.metric("Reguläre Kunden", total_customers - reseller_count)
-                            with col3:
-                                st.metric("Reseller", reseller_count)
+                            st.plotly_chart(fig, use_container_width=True)
                     
-                    except Exception as e:
-                        st.error(f"❌ Fehler bei der Analyse: {e}")
-                        st.exception(e)
+                    with tab2:
+                        st.markdown("### 💧 Kundenentwicklung Waterfall")
+                        
+                        waterfall = results['waterfall_data']
+                        if len(waterfall) > 0:
+                            selected_group = st.selectbox(
+                                "Produktgruppe auswählen:",
+                                options=['Alle'] + list(waterfall['Gruppe'].unique())
+                            )
+                            
+                            fig = create_waterfall_chart(waterfall, selected_group)
+                            st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Detail-Tabelle
+                            with st.expander("📋 Waterfall Details"):
+                                st.dataframe(waterfall, use_container_width=True, hide_index=True)
+                    
+                    with tab3:
+                        st.markdown("### 👥 Verkäufer-Performance")
+                        
+                        if selected_sellers:
+                            st.success(f"✅ Zeige Daten für {len(selected_sellers)} ausgewählte Verkäufer")
+                        
+                        if 'Zugewiesen an' in df.columns:
+                            col1, col2 = st.columns([1, 3])
+                            with col1:
+                                filter_type = st.radio(
+                                    "Ansicht:",
+                                    ["Alle Verkäufer", "Einzelner Verkäufer"]
+                                )
+                            
+                            with col2:
+                                if filter_type == "Einzelner Verkäufer":
+                                    # Nur ausgewählte Verkäufer zur Auswahl
+                                    seller_options = selected_sellers if selected_sellers else sorted(df['Verkäufer'].unique())
+                                    selected_salesperson = st.selectbox(
+                                        "Verkäufer:",
+                                        options=seller_options
+                                    )
+                                else:
+                                    selected_salesperson = None
+                            
+                            create_sales_performance_view(
+                                results['sales_performance'],
+                                results['sales_summary'],
+                                filter_type,
+                                selected_salesperson
+                            )
+                        else:
+                            st.warning("⚠️ Spalte 'Zugewiesen an' nicht gefunden - Verkäufer-Analyse nicht möglich")
+                    
+                    with tab4:
+                        st.markdown("### 🔄 Reaktivierungen")
+                        
+                        if len(results['reactivations']) > 0:
+                            st.dataframe(
+                                results['reactivations'].style.format({
+                                    'Ø Pause (Tage)': '{:.0f}'
+                                }),
+                                use_container_width=True,
+                                hide_index=True
+                            )
+                        else:
+                            st.info("Keine Reaktivierungen gefunden")
+                    
+                    with tab5:
+                        st.markdown("### 📊 Detailanalysen")
+                        
+                        # Monatlicher Churn
+                        st.markdown("#### Monatlicher Churn (letzte 12 Monate)")
+                        st.dataframe(
+                            results['monthly_pivot'].style.format('{:.1f}%'),
+                            use_container_width=True
+                        )
+                        
+                        # Statistiken
+                        st.markdown("#### Gesamtstatistiken")
+                        total_customers = df['Kundennummer'].nunique()
+                        reseller_count = len([k for k in df['Kundennummer'].unique() if k in RESELLER_CUSTOMERS])
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Gesamt Kunden", total_customers)
+                        with col2:
+                            st.metric("Reguläre Kunden", total_customers - reseller_count)
+                        with col3:
+                            st.metric("Reseller", reseller_count)
+                
+                except Exception as e:
+                    st.error(f"❌ Fehler bei der Analyse: {e}")
+                    st.exception(e)
     else:
         # Welcome Screen
         st.markdown("""
