@@ -1,3 +1,5 @@
+# Relevante Verkäufer für Churn-Analyse:
+
 Andreas Sabados
 #Brigitte Tschenett
 Christoph Girardelli
@@ -13,15 +15,17 @@ Rouel Stecher
 Stefan Streli
 Thomas Kröll
 Veronika Haladova
-# ehemalige und externe #
+
+Manuel Burger
+Raphaela Pilss
+René Strasser
+Sabine Frank
+
+# Ausgeschlossene Verkäufer:
+
 # (extern) #Jürgen Winkler
 # (extern) #Russmedia Gruppe
 # (extern) #Stefan Pestuka
 # Dennis Grünwald
 # Julia Renner
 # Wolfgang Piller
-#### eventuell berücksichtigen ###
-Manuel Burger
-Raphaela Pilss
-René Strasser
-Sabine Frank
