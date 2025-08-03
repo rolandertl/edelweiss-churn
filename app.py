@@ -1,349 +1,4 @@
-# HAUPTAPP
-def main():
-    set_page_config()
-    
-    # Header
-    create_gradient_header(
-        "🎯 EDELWEISS Churn Analytics",
-        "Intelligente Kundenabwanderungsanalyse mit KI-gestützten Insights"
-    )
-    
-    # Sidebar
-    with st.sidebar:
-        st.markdown("## ⚙️ Einstellungen")
-        
-        grace_period = st.slider(
-            "🔄 Reaktivierungs-Karenzzeit",
-            min_value=30,
-            max_value=180,
-            value=90,
-            step=15,
-            help="Tage bis ein Kunde als endgültig verloren gilt"
-        )
-        
-        st.markdown("---")
-        
-        # Verkäufer-Filter
-        st.markdown("### 👥 Verkäufer-Filter")
-        
-        # Option 1: Textdatei hochladen
-        seller_file = st.file_uploader(
-            "📄 Verkäufer-Liste hochladen",
-            type=["txt"],
-            help="Textdatei mit einem Verkäufernamen pro Zeile"
-        )
-        
-        selected_sellers = None
-        available_sellers = []
-        
-        if seller_file:
-            try:
-                seller_content = seller_file.read().decode('utf-8')
-                # Parse Verkäufer aus Datei (ignoriere Kommentare)
-                selected_sellers = [
-                    line.strip() for line in seller_content.splitlines()
-                    if line.strip() and not line.strip().startswith('#')
-                ]
-                st.success(f"✅ {len(selected_sellers)} Verkäufer geladen")
-            except Exception as e:
-                st.error(f"Fehler beim Lesen der Datei: {e}")
-        
-        st.markdown("---")
-        
-        # Reseller Info
-        st.markdown("### 🏢 Spezialbehandlung: Reseller")
-        st.info(
-            "Folgende Reseller-Kunden werden bei der Churn-Berechnung "
-            "gesondert behandelt:"
-        )
-        for kunde_nr, name in RESELLER_NAMES.items():
-            st.markdown(f"• **{name}** ({kunde_nr})")
-        
-        st.markdown("---")
-        
-        # Info
-        st.markdown("### 📊 Über diese Analyse")
-        st.markdown("""
-        Diese App analysiert Kundenabwanderung mit:
-        - **Echte Kündigungen** vs. temporäre Pausen
-        - **Jahres-Trends** seit 2020
-        - **Verkäufer-Performance** Tracking
-        - **Waterfall-Visualisierung** der Kundenbewegungen
-        """)
-    
-    # File Upload
-    file = st.file_uploader(
-        "📁 Excel-Datei hochladen",
-        type=["xlsx"],
-        help="Laden Sie Ihre Kundendaten-Excel hier hoch"
-    )
-    
-    if file:
-        st.success("✅ Datei erfolgreich hochgeladen!")
-        
-        # Vorschau
-        with st.expander("👀 Datenvorschau"):
-            try:
-                preview_df = pd.read_excel(file, nrows=5)
-                st.dataframe(preview_df, use_container_width=True)
-            except Exception as e:
-                st.warning(f"Vorschau konnte nicht geladen werden: {e}")
-        
-        # Verkäufer aus Excel laden für Multiselect
-        try:
-            df_temp = pd.read_excel(file)
-            if 'Zugewiesen an' in df_temp.columns:
-                df_temp['Verkäufer'] = df_temp['Zugewiesen an'].fillna('Nicht zugewiesen').str.strip()
-                available_sellers = sorted(df_temp['Verkäufer'].unique())
-                
-                # Option 2: Multiselect wenn keine Datei geladen
-                if not seller_file and available_sellers:
-                    st.markdown("### 🎯 Verkäufer auswählen")
-                    st.info("💡 Tipp: Laden Sie eine verkaeufer.txt Datei in der Sidebar für vordefinierte Auswahl")
-                    
-                    # Vorauswahl: Alle außer "Nicht zugewiesen" und bekannte externe
-                    exclude_keywords = ['extern', 'ehemalig', 'freelance', 'praktikant', 'nicht zugewiesen']
-                    default_selection = [
-                        s for s in available_sellers 
-                        if not any(keyword in s.lower() for keyword in exclude_keywords)
-                    ]
-                    
-                    selected_sellers = st.multiselect(
-                        "Wählen Sie die zu analysierenden Verkäufer:",
-                        options=available_sellers,
-                        default=default_selection,
-                        help="Externe und ehemalige Mitarbeiter können hier ausgeschlossen werden"
-                    )
-        except:
-            pass
-        
-        # Start-Button
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("🚀 Analyse starten", use_container_width=True):
-                with st.spinner("🔄 Analysiere Daten..."):
-                    try:
-                        # Daten laden und verarbeiten
-                        df = pd.read_excel(file)
-                        
-                        # Validierung
-                        required_cols = ['Abo', 'Produktkategorie', 'Produkt', 'Beginn', 'Ende', 'Kundennummer']
-                        missing_cols = [col for col in required_cols if col not in df.columns]
-                        
-                        if missing_cols:
-                            st.error(f"❌ Fehlende Spalten: {', '.join(missing_cols)}")
-                            st.stop()
-                        
-                        # Info über gefilterte Verkäufer
-                        if selected_sellers:
-                            st.info(f"🎯 Analyse für {len(selected_sellers)} ausgewählte Verkäufer")
-                        
-                        # Analyse durchführen
-                        results = process_data(df, grace_period, selected_sellers)
-                        
-                        # HAUPTMETRICS
-                        st.markdown("## 📊 Aktuelle Jahresübersicht")
-                        
-                        current_churn = results['current_year_churn']
-                        if len(current_churn) > 0:
-                            # Metrics Cards
-                            cols = st.columns(len(current_churn))
-                            for i, (_, row) in enumerate(current_churn.iterrows()):
-                                with cols[i]:
-                                    color = "success" if row['Churn Rate (%)'] < 10 else "warning" if row['Churn Rate (%)'] < 20 else "danger"
-                                    st.metric(
-                                        row['Produktgruppe'],
-                                        f"{row['Churn Rate (%)']}%",
-                                        delta=f"{row['Verluste']} von {row['Aktive Kunden']}",
-                                        delta_color="inverse"
-                                    )
-                        
-                        # TABS für verschiedene Analysen
-                        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-                            "📈 Trends",
-                            "💧 Waterfall",
-                            "👥 Verkäufer",
-                            "🔄 Reaktivierungen",
-                            "📊 Details"
-                        ])
-                        
-                        with tab1:
-                            st.markdown("### 📈 Jahres-Trend Analyse")
-                            
-                            yearly_data = results['yearly_churn']
-                            if len(yearly_data) > 0:
-                                yearly_pivot = yearly_data.pivot(index='Jahr', columns='Gruppe', values='JahresChurn (%)').fillna(0)
-                                
-                                fig = go.Figure()
-                                colors = px.colors.qualitative.Set2
-                                
-                                for i, gruppe in enumerate(yearly_pivot.columns):
-                                    fig.add_trace(go.Scatter(
-                                        x=yearly_pivot.index,
-                                        y=yearly_pivot[gruppe],
-                                        mode='lines+markers',
-                                        name=gruppe,
-                                        line=dict(color=colors[i % len(colors)], width=3),
-                                        marker=dict(size=10),
-                                        hovertemplate='<b>%{fullData.name}</b><br>' +
-                                                      'Jahr: %{x}<br>' +
-                                                      'Churn: %{y:.1f}%<br>' +
-                                                      '<extra></extra>'
-                                    ))
-                                
-                                fig.update_layout(
-                                    title="Churn-Entwicklung 2020 bis heute",
-                                    xaxis_title="Jahr",
-                                    yaxis_title="Churn Rate (%)",
-                                    hovermode='x unified',
-                                    height=500,
-                                    plot_bgcolor='rgba(0,0,0,0)',
-                                    paper_bgcolor='rgba(0,0,0,0)',
-                                    font=dict(size=14),
-                                    legend=dict(
-                                        orientation="h",
-                                        yanchor="bottom",
-                                        y=-0.2,
-                                        xanchor="center",
-                                        x=0.5
-                                    )
-                                )
-                                
-                                st.plotly_chart(fig, use_container_width=True)
-                        
-                        with tab2:
-                            st.markdown("### 💧 Kundenentwicklung Waterfall")
-                            
-                            waterfall = results['waterfall_data']
-                            if len(waterfall) > 0:
-                                selected_group = st.selectbox(
-                                    "Produktgruppe auswählen:",
-                                    options=['Alle'] + list(waterfall['Gruppe'].unique())
-                                )
-                                
-                                fig = create_waterfall_chart(waterfall, selected_group)
-                                st.plotly_chart(fig, use_container_width=True)
-                                
-                                # Detail-Tabelle
-                                with st.expander("📋 Waterfall Details"):
-                                    st.dataframe(waterfall, use_container_width=True, hide_index=True)
-                        
-                        with tab3:
-                            st.markdown("### 👥 Verkäufer-Performance")
-                            
-                            if selected_sellers:
-                                st.success(f"✅ Zeige Daten für {len(selected_sellers)} ausgewählte Verkäufer")
-                            
-                            if 'Zugewiesen an' in df.columns:
-                                col1, col2 = st.columns([1, 3])
-                                with col1:
-                                    filter_type = st.radio(
-                                        "Ansicht:",
-                                        ["Alle Verkäufer", "Einzelner Verkäufer"]
-                                    )
-                                
-                                with col2:
-                                    if filter_type == "Einzelner Verkäufer":
-                                        # Nur ausgewählte Verkäufer zur Auswahl
-                                        seller_options = selected_sellers if selected_sellers else sorted(df['Verkäufer'].unique())
-                                        selected_salesperson = st.selectbox(
-                                            "Verkäufer:",
-                                            options=seller_options
-                                        )
-                                    else:
-                                        selected_salesperson = None
-                                
-                                create_sales_performance_view(
-                                    results['sales_performance'],
-                                    results['sales_summary'],
-                                    filter_type,
-                                    selected_salesperson
-                                )
-                            else:
-                                st.warning("⚠️ Spalte 'Zugewiesen an' nicht gefunden - Verkäufer-Analyse nicht möglich")
-                        
-                        with tab4:
-                            st.markdown("### 🔄 Reaktivierungen")
-                            
-                            if len(results['reactivations']) > 0:
-                                st.dataframe(
-                                    results['reactivations'].style.format({
-                                        'Ø Pause (Tage)': '{:.0f}'
-                                    }),
-                                    use_container_width=True,
-                                    hide_index=True
-                                )
-                            else:
-                                st.info("Keine Reaktivierungen gefunden")
-                        
-                        with tab5:
-                            st.markdown("### 📊 Detailanalysen")
-                            
-                            # Monatlicher Churn
-                            st.markdown("#### Monatlicher Churn (letzte 12 Monate)")
-                            st.dataframe(
-                                results['monthly_pivot'].style.format('{:.1f}%'),
-                                use_container_width=True
-                            )
-                            
-                            # Statistiken
-                            st.markdown("#### Gesamtstatistiken")
-                            total_customers = df['Kundennummer'].nunique()
-                            reseller_count = len([k for k in df['Kundennummer'].unique() if k in RESELLER_CUSTOMERS])
-                            
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Gesamt Kunden", total_customers)
-                            with col2:
-                                st.metric("Reguläre Kunden", total_customers - reseller_count)
-                            with col3:
-                                st.metric("Reseller", reseller_count)
-                    
-                    except Exception as e:
-                        st.error(f"❌ Fehler bei der Analyse: {e}")
-                        st.exception(e)
-    else:
-        # Welcome Screen
-        st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
-            border-radius: 12px;
-            padding: 3rem;
-            text-align: center;
-            margin: 2rem 0;
-        ">
-            <h2>👋 Willkommen bei EDELWEISS Churn Analytics</h2>
-            <p style="font-size: 1.1rem; color: #64748B; margin: 1rem 0;">
-                Laden Sie Ihre Excel-Datei hoch, um mit der intelligenten Kundenanalyse zu beginnen.
-            </p>
-            <p style="color: #94A3B8;">
-                Benötigte Spalten: Abo, Produktkategorie, Produkt, Beginn, Ende, Kundennummer, Zugewiesen an
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Beispiel-Verkäuferliste anzeigen
-        with st.expander("📝 Beispiel: Verkäufer-Liste Format"):
-            st.markdown("""
-            Erstellen Sie eine `verkaeufer.txt` Datei mit folgendem Format:
-            ```
-            # Relevante Verkäufer für Churn-Analyse
-            # Jeden Namen in eine neue Zeile
-            # Zeilen mit # werden ignoriert
-            
-            Max Mustermann
-            Anna Schmidt
-            Thomas Weber
-            Julia Fischer
-            
-            # Externe/Ehemalige (auskommentiert):
-            # Peter External
-            # Klaus Ehemalig
-            ```
-            """)
-
-if __name__ == "__main__":
-    main()"""
+"""
 EDELWEISS Digital - Churn Analytics Dashboard
 Modern, interaktives Dashboard für Kundenabwanderungsanalyse
 """
@@ -365,12 +20,12 @@ warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 # Moderne Farbpalette
 COLORS = {
-    'primary': '#6366F1',      # Indigo
-    'success': '#10B981',      # Emerald  
-    'danger': '#EF4444',       # Red
-    'warning': '#F59E0B',      # Amber
-    'info': '#3B82F6',         # Blue
-    'dark': '#1F2937',         # Dark Gray
+    'primary': '#6366F1',
+    'success': '#10B981',
+    'danger': '#EF4444',
+    'warning': '#F59E0B',
+    'info': '#3B82F6',
+    'dark': '#1F2937',
     'gradient_start': '#667EEA',
     'gradient_end': '#764BA2'
 }
@@ -387,12 +42,10 @@ def set_page_config():
     # Custom CSS für modernes Design
     st.markdown("""
     <style>
-        /* Hauptcontainer */
         .main {
             padding: 0rem 1rem;
         }
         
-        /* Header Styling */
         h1 {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             -webkit-background-clip: text;
@@ -401,7 +54,6 @@ def set_page_config():
             margin-bottom: 2rem;
         }
         
-        /* Metric Cards */
         div[data-testid="metric-container"] {
             background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
             border: 1px solid rgba(102, 126, 234, 0.2);
@@ -416,7 +68,6 @@ def set_page_config():
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
         }
         
-        /* Tabs */
         .stTabs [data-baseweb="tab-list"] {
             gap: 8px;
         }
@@ -435,7 +86,6 @@ def set_page_config():
             color: white;
         }
         
-        /* Buttons */
         .stButton > button {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -451,25 +101,21 @@ def set_page_config():
             box-shadow: 0 10px 20px -5px rgba(102, 126, 234, 0.5);
         }
         
-        /* Expander */
         .streamlit-expanderHeader {
             background: rgba(102, 126, 234, 0.05);
             border-radius: 8px;
             border: 1px solid rgba(102, 126, 234, 0.2);
         }
         
-        /* Success/Error Messages */
         .stAlert {
             border-radius: 8px;
             border-left: 4px solid;
         }
         
-        /* Sidebar */
         section[data-testid="stSidebar"] {
             background: linear-gradient(180deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
         }
         
-        /* DataFrame */
         .dataframe {
             border: 1px solid rgba(102, 126, 234, 0.2) !important;
             border-radius: 8px !important;
@@ -862,11 +508,38 @@ def main():
         
         st.markdown("---")
         
+        # Verkäufer-Filter
+        st.markdown("### 👥 Verkäufer-Filter")
+        
+        # Option 1: Textdatei hochladen
+        seller_file = st.file_uploader(
+            "📄 Verkäufer-Liste hochladen",
+            type=["txt"],
+            help="Textdatei mit einem Verkäufernamen pro Zeile"
+        )
+        
+        selected_sellers = None
+        available_sellers = []
+        
+        if seller_file:
+            try:
+                seller_content = seller_file.read().decode('utf-8')
+                # Parse Verkäufer aus Datei (ignoriere Kommentare)
+                selected_sellers = [
+                    line.strip() for line in seller_content.splitlines()
+                    if line.strip() and not line.strip().startswith('#')
+                ]
+                st.success(f"✅ {len(selected_sellers)} Verkäufer geladen")
+            except Exception as e:
+                st.error(f"Fehler beim Lesen der Datei: {e}")
+        
+        st.markdown("---")
+        
         # Reseller Info
         st.markdown("### 🏢 Spezialbehandlung: Reseller")
         st.info(
             "Folgende Reseller-Kunden werden bei der Churn-Berechnung "
-            "gesondert behandelt, da sie andere Geschäftsmodelle haben:"
+            "gesondert behandelt:"
         )
         for kunde_nr, name in RESELLER_NAMES.items():
             st.markdown(f"• **{name}** ({kunde_nr})")
@@ -901,6 +574,34 @@ def main():
             except Exception as e:
                 st.warning(f"Vorschau konnte nicht geladen werden: {e}")
         
+        # Verkäufer aus Excel laden für Multiselect
+        try:
+            df_temp = pd.read_excel(file)
+            if 'Zugewiesen an' in df_temp.columns:
+                df_temp['Verkäufer'] = df_temp['Zugewiesen an'].fillna('Nicht zugewiesen').str.strip()
+                available_sellers = sorted(df_temp['Verkäufer'].unique())
+                
+                # Option 2: Multiselect wenn keine Datei geladen
+                if not seller_file and available_sellers:
+                    st.markdown("### 🎯 Verkäufer auswählen")
+                    st.info("💡 Tipp: Laden Sie eine verkaeufer.txt Datei in der Sidebar für vordefinierte Auswahl")
+                    
+                    # Vorauswahl: Alle außer "Nicht zugewiesen" und bekannte externe
+                    exclude_keywords = ['extern', 'ehemalig', 'freelance', 'praktikant', 'nicht zugewiesen']
+                    default_selection = [
+                        s for s in available_sellers 
+                        if not any(keyword in s.lower() for keyword in exclude_keywords)
+                    ]
+                    
+                    selected_sellers = st.multiselect(
+                        "Wählen Sie die zu analysierenden Verkäufer:",
+                        options=available_sellers,
+                        default=default_selection,
+                        help="Externe und ehemalige Mitarbeiter können hier ausgeschlossen werden"
+                    )
+        except:
+            pass
+        
         # Start-Button
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
@@ -918,8 +619,12 @@ def main():
                             st.error(f"❌ Fehlende Spalten: {', '.join(missing_cols)}")
                             st.stop()
                         
+                        # Info über gefilterte Verkäufer
+                        if selected_sellers:
+                            st.info(f"🎯 Analyse für {len(selected_sellers)} ausgewählte Verkäufer")
+                        
                         # Analyse durchführen
-                        results = process_data(df, grace_period)
+                        results = process_data(df, grace_period, selected_sellers)
                         
                         # HAUPTMETRICS
                         st.markdown("## 📊 Aktuelle Jahresübersicht")
@@ -1011,6 +716,9 @@ def main():
                         with tab3:
                             st.markdown("### 👥 Verkäufer-Performance")
                             
+                            if selected_sellers:
+                                st.success(f"✅ Zeige Daten für {len(selected_sellers)} ausgewählte Verkäufer")
+                            
                             if 'Zugewiesen an' in df.columns:
                                 col1, col2 = st.columns([1, 3])
                                 with col1:
@@ -1021,10 +729,11 @@ def main():
                                 
                                 with col2:
                                     if filter_type == "Einzelner Verkäufer":
-                                        df['Verkäufer'] = df['Zugewiesen an'].fillna('Nicht zugewiesen').str.strip()
+                                        # Nur ausgewählte Verkäufer zur Auswahl
+                                        seller_options = selected_sellers if selected_sellers else sorted(df['Verkäufer'].unique())
                                         selected_salesperson = st.selectbox(
                                             "Verkäufer:",
-                                            options=sorted(df['Verkäufer'].unique())
+                                            options=seller_options
                                         )
                                     else:
                                         selected_salesperson = None
@@ -1097,6 +806,26 @@ def main():
             </p>
         </div>
         """, unsafe_allow_html=True)
+        
+        # Beispiel-Verkäuferliste anzeigen
+        with st.expander("📝 Beispiel: Verkäufer-Liste Format"):
+            st.markdown("""
+            Erstellen Sie eine `verkaeufer.txt` Datei mit folgendem Format:
+            ```
+            # Relevante Verkäufer für Churn-Analyse
+            # Jeden Namen in eine neue Zeile
+            # Zeilen mit # werden ignoriert
+            
+            Max Mustermann
+            Anna Schmidt
+            Thomas Weber
+            Julia Fischer
+            
+            # Externe/Ehemalige (auskommentiert):
+            # Peter External
+            # Klaus Ehemalig
+            ```
+            """)
 
 if __name__ == "__main__":
-    main()data[perf_
+    main()
