@@ -13,7 +13,7 @@ RELEVANT_GROUPS = [
     "Postings", "Superkombis", "Social Media Werbeanzeigen"
 ]
 
-# Reseller-Kundennummern (werden bei True Churn ignoriert)
+# Reseller-Kundennummern (werden bei der Analyse speziell behandelt)
 RESELLER_CUSTOMERS = [1902101, 1909143, 1903121, 1905146, 1911102]
 
 RESELLER_NAMES = {
@@ -226,12 +226,23 @@ def calculate_waterfall_data(df: pd.DataFrame, churn_events: pd.DataFrame, year:
     
     return pd.DataFrame(waterfall_data)
 
-def analyze_sales_performance(df: pd.DataFrame, churn_events: pd.DataFrame):
-    """Analysiert Churn-Performance nach Verkäufern"""
+def analyze_sales_performance(df: pd.DataFrame, churn_events: pd.DataFrame, selected_sellers: list = None):
+    """
+    Analysiert Churn-Performance nach Verkäufern
+    
+    Args:
+        df: DataFrame mit Kundendaten
+        churn_events: DataFrame mit Churn Events
+        selected_sellers: Liste der zu analysierenden Verkäufer (None = alle)
+    """
     if 'Zugewiesen an' not in df.columns:
         return pd.DataFrame(), pd.DataFrame()
     
     df['Verkäufer'] = df['Zugewiesen an'].fillna('Nicht zugewiesen').str.strip()
+    
+    # Filter auf ausgewählte Verkäufer anwenden
+    if selected_sellers:
+        df = df[df['Verkäufer'].isin(selected_sellers)]
     
     current_year = pd.Timestamp.today().year
     y_start = pd.Timestamp(f"{current_year}-01-01")
