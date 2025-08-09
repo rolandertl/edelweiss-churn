@@ -694,15 +694,25 @@ def main():
                             # Tabelle über dem Chart
                             st.markdown("#### 📊 Jahres-Churn Übersicht")
                             
-                            # Formatierte Tabelle mit Farbcodierung
-                            styled_pivot = yearly_pivot.style.format('{:.1f}%').background_gradient(
-                                cmap='RdYlGn_r',
-                                vmin=0,
-                                vmax=30,
-                                axis=None
-                            ).set_properties(**{
+                            # Funktion für bedingte Formatierung
+                            def color_churn(val):
+                                """Färbt Zellen basierend auf Churn-Rate"""
+                                if isinstance(val, str):
+                                    return ''
+                                num_val = float(str(val).replace('%', ''))
+                                if num_val < 10:
+                                    color = 'background-color: #D4EDDA; color: #155724'  # Grün
+                                elif num_val < 20:
+                                    color = 'background-color: #FFF3CD; color: #856404'  # Gelb
+                                else:
+                                    color = 'background-color: #F8D7DA; color: #721C24'  # Rot
+                                return color
+                            
+                            # Formatierte Tabelle mit bedingter Formatierung
+                            styled_pivot = yearly_pivot.style.format('{:.1f}%').applymap(color_churn).set_properties(**{
                                 'font-weight': 'bold',
-                                'text-align': 'center'
+                                'text-align': 'center',
+                                'border': '1px solid #dee2e6'
                             })
                             
                             st.dataframe(styled_pivot, use_container_width=True)
@@ -771,7 +781,7 @@ def main():
                                 
                                 trend_df = pd.DataFrame(trend_data)
                                 st.dataframe(
-                                    trend_df.style.format(precision=1),
+                                    trend_df,
                                     use_container_width=True,
                                     hide_index=True
                                 )
