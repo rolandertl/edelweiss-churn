@@ -691,6 +691,25 @@ def main():
                         if len(yearly_data) > 0:
                             yearly_pivot = yearly_data.pivot(index='Jahr', columns='Gruppe', values='JahresChurn (%)').fillna(0)
                             
+                            # Tabelle über dem Chart
+                            st.markdown("#### 📊 Jahres-Churn Übersicht")
+                            
+                            # Formatierte Tabelle mit Farbcodierung
+                            styled_pivot = yearly_pivot.style.format('{:.1f}%').background_gradient(
+                                cmap='RdYlGn_r',
+                                vmin=0,
+                                vmax=30,
+                                axis=None
+                            ).set_properties(**{
+                                'font-weight': 'bold',
+                                'text-align': 'center'
+                            })
+                            
+                            st.dataframe(styled_pivot, use_container_width=True)
+                            
+                            # Zusammenfassungs-Metriken
+                            st.markdown("#### 📈 Trend-Entwicklung")
+                            
                             fig = go.Figure()
                             colors = px.colors.qualitative.Set2
                             
@@ -727,6 +746,35 @@ def main():
                             )
                             
                             st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Zusätzliche Insights unter dem Chart
+                            with st.expander("🔍 Detaillierte Analyse"):
+                                # Durchschnittlicher Churn pro Gruppe
+                                avg_churn = yearly_pivot.mean().round(1)
+                                trend_data = []
+                                
+                                for gruppe in yearly_pivot.columns:
+                                    values = yearly_pivot[gruppe]
+                                    first_year = values.iloc[0]
+                                    last_year = values.iloc[-1]
+                                    change = last_year - first_year
+                                    trend = "📈" if change > 0 else "📉" if change < 0 else "➡️"
+                                    
+                                    trend_data.append({
+                                        'Produktgruppe': gruppe,
+                                        'Ø Churn': f"{avg_churn[gruppe]}%",
+                                        f'{values.index[0]}': f"{first_year}%",
+                                        f'{values.index[-1]}': f"{last_year}%",
+                                        'Veränderung': f"{change:+.1f}%",
+                                        'Trend': trend
+                                    })
+                                
+                                trend_df = pd.DataFrame(trend_data)
+                                st.dataframe(
+                                    trend_df.style.format(precision=1),
+                                    use_container_width=True,
+                                    hide_index=True
+                                )
                     
                     with tab2:
                         st.markdown("### 💧 Kundenentwicklung Waterfall")
