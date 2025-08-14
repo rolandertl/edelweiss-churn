@@ -15,6 +15,7 @@ from churn_analytics import (
     calculate_waterfall_data, analyze_sales_performance,
     calculate_current_year_churn, map_group, last_12_full_months
 )
+from sales_analytics import analyze_sales_performance_extended, MIN_ACTIVE_CUSTOMERS
 
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
@@ -176,7 +177,14 @@ def process_data(df: pd.DataFrame, grace_period_days: int = 90, selected_sellers
     yearly_churn = calculate_yearly_churn(df, churn_events, start_year=2020)
     current_year_churn = calculate_current_year_churn(df, churn_events)
     waterfall_data = calculate_waterfall_data(df, churn_events, pd.Timestamp.today().year)
+    
+    # Alte simple Verkäufer-Performance (für Rückwärtskompatibilität)
     sales_performance, sales_summary = analyze_sales_performance(df, churn_events, selected_sellers)
+    
+    # NEUE erweiterte Verkäufer-Performance
+    sales_performance_extended, sales_summary_extended, sales_insights = analyze_sales_performance_extended(
+        df, churn_events, reactivations, selected_sellers
+    )
     
     # Monatliche Daten
     months = last_12_full_months(pd.Timestamp.today())
@@ -214,6 +222,9 @@ def process_data(df: pd.DataFrame, grace_period_days: int = 90, selected_sellers
         'waterfall_data': waterfall_data,
         'sales_performance': sales_performance,
         'sales_summary': sales_summary,
+        'sales_performance_extended': sales_performance_extended,
+        'sales_summary_extended': sales_summary_extended,
+        'sales_insights': sales_insights,
         'df': df
     }
 
@@ -276,7 +287,271 @@ def create_waterfall_chart(waterfall_data, selected_group='Alle'):
     
     return fig
 
-def create_sales_performance_view(perf_data, summary, filter_type, selected_salesperson=None):
+def create_extended_sales_view(detailed_df, summary_df, insights, filter_type, selected_salesperson=None):
+    """Erstellt die erweiterte Verkäufer-Performance Ansicht mit KPIs"""
+    
+    if len(detailed_df) == 0:
+        st.warning(f"⚠️ Keine Verkäufer mit mindestens {MIN_ACTIVE_CUSTOMERS} aktiven Kunden gefunden")
+        return
+    
+    if filter_type == "Einzelner Verkäufer" and selected_salesperson:
+        # Einzelansicht
+        seller_data = detailed_df[detailed_df['Verkäufer'] == selected_salesperson]
+        
+        if len(seller_data) > 0:
+            seller = seller_data.iloc[0]
+            
+            # Header mit Rang
+            st.markdown(f"### 🏆 Rang #{seller['Rang']} von {len(detailed_df)}")
+            
+            # KPI Cards
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    "Performance-Score",
+                    f"{seller['Performance-Score']:.1f}",
+                    help="Gewichteter Score aus allen KPIs"
+                )
+            
+            with col2:
+                st.metric(
+                    "Aktive Kunden",
+                    seller['Aktive Kunden'],
+                    f"{seller['Netto-Wachstum']:+d}",
+                    delta_color="normal"
+                )
+            
+            with col3:
+                st.metric(
+                    "Churn Rate",
+                    f"{seller['Churn Rate (%)']}%",
+                    delta_color="inverse"
+                )
+            
+            with col4:
+                st.metric(
+                    "Ø Kundenbindung",
+                    f"{seller['Ø Kundenbindung (Monate)']} Mon.",
+                    help="Durchschnittliche Vertragsdauer"
+                )
+            
+            # Erweiterte KPIs
+            st.markdown("#### 📊 Erweiterte Performance-Metriken")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    "Reaktivierungsquote",
+                    f"{seller['Reaktivierungsquote (%)']}%",
+                    help="Anteil zurückgewonnener Kunden"
+                )
+            
+            with col2:
+                st.metric(
+                    "Upselling-Rate",
+                    f"{seller['Upselling-Rate (%)']}%",
+                    help="Kunden mit mehreren Produkten"
+                )
+            
+            with col3:
+                st.metric(
+                    "Ø Produkte/Kunde",
+                    f"{seller['Ø Produkte/Kunde']}",
+                    help="Durchschnittliche Produktanzahl"
+                )
+            
+            with col4:
+                st.metric(
+                    "Premium-Quote",
+                    f"{seller['Premium-Quote (%)']}%",
+                    help="Anteil Premium-Produkte"
+                )
+            
+            # Radar Chart für KPIs
+            st.markdown("#### 🎯 Performance-Profil")
+            
+            categories = ['Niedrige Churn', 'Kundenbindung', 'Reaktivierung', 'Upselling', 'Wachstum']
+            values = [
+                100 - seller['Churn Rate (%)'],
+                min(seller['Ø Kundenbindung (Monate)'] / 36 * 100, 100),  # Normalisiert auf 3 Jahre
+                seller['Reaktivierungsquote (%)'],
+                seller['Upselling-Rate (%)'],
+                max(min((seller['Netto-Wachstum'] / seller['Aktive Kunden'] * 100 + 50), 100), 0)  # Normalisiert
+            ]
+            
+            fig = go.Figure()
+            
+            fig.add_trace(go.Scatterpolar(
+                r=values,
+                theta=categories,
+                fill='toself',
+                name=selected_salesperson,
+                fillcolor='rgba(99, 102, 241, 0.2)',
+                line=dict(color='#6366F1', width=2)
+            ))
+            
+            # Durchschnitt als Referenz
+            avg_values = [
+                100 - detailed_df['Churn Rate (%)'].mean(),
+                min(detailed_df['Ø Kundenbindung (Monate)'].mean() / 36 * 100, 100),
+                detailed_df['Reaktivierungsquote (%)'].mean(),
+                detailed_df['Upselling-Rate (%)'].mean(),
+                50  # Neutral für Wachstum
+            ]
+            
+            fig.add_trace(go.Scatterpolar(
+                r=avg_values,
+                theta=categories,
+                name='Team-Durchschnitt',
+                line=dict(color='gray', width=1, dash='dash')
+            ))
+            
+            fig.update_layout(
+                polar=dict(
+                    radialaxis=dict(
+                        visible=True,
+                        range=[0, 100]
+                    )),
+                showlegend=True,
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+        else:
+            st.info(f"Keine Daten für {selected_salesperson} gefunden")
+    
+    else:
+        # Team-Übersicht
+        st.markdown("### 🏆 Performance-Ranking")
+        st.info(f"Zeigt nur Verkäufer mit mindestens {MIN_ACTIVE_CUSTOMERS} aktiven Kunden")
+        
+        # Top 3 Performer
+        if len(detailed_df) >= 3:
+            st.markdown("#### 🥇🥈🥉 Top 3 Performer")
+            cols = st.columns(3)
+            medals = ["🥇", "🥈", "🥉"]
+            
+            for i, col in enumerate(cols):
+                if i < len(detailed_df):
+                    performer = detailed_df.iloc[i]
+                    with col:
+                        st.markdown(f"""
+                        <div style="
+                            background: linear-gradient(135deg, #FFD700{20-i*5} 0%, #FFA500{20-i*5} 100%);
+                            padding: 1.5rem;
+                            border-radius: 12px;
+                            text-align: center;
+                        ">
+                            <h2>{medals[i]}</h2>
+                            <h3>{performer['Verkäufer']}</h3>
+                            <p style="font-size: 2rem; font-weight: bold;">{performer['Performance-Score']:.1f}</p>
+                            <p>Churn: {performer['Churn Rate (%)']}%</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+        
+        # Detaillierte Ranking-Tabelle
+        st.markdown("#### 📊 Vollständiges Ranking")
+        
+        # Formatierte Tabelle
+        display_df = summary_df.copy()
+        
+        # Farbcodierung für Performance-Score
+        def color_score(val):
+            if val >= 80:
+                return 'background-color: #D4EDDA'
+            elif val >= 60:
+                return 'background-color: #FFF3CD'
+            else:
+                return 'background-color: #F8D7DA'
+        
+        styled_df = display_df.style.applymap(
+            color_score, 
+            subset=['Performance-Score']
+        ).format({
+            'Churn Rate (%)': '{:.1f}%',
+            'Ø Kundenbindung (Monate)': '{:.1f}',
+            'Performance-Score': '{:.1f}'
+        })
+        
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        
+        # Team-Insights
+        if insights:
+            st.markdown("#### 💡 Team-Insights")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Stärken
+                if insights.get('strengths'):
+                    st.success("**Team-Stärken:**")
+                    for strength in insights['strengths']:
+                        st.markdown(f"✅ {strength}")
+                
+                # Top Performer Details
+                if insights.get('top_performers'):
+                    st.markdown("**🌟 Besondere Leistungen:**")
+                    for performer in insights['top_performers'][:3]:
+                        st.markdown(f"• **{performer['name']}**: {performer['best_metric']}")
+            
+            with col2:
+                # Verbesserungspotentiale
+                if insights.get('opportunities'):
+                    st.warning("**Verbesserungspotentiale:**")
+                    for opp in insights['opportunities']:
+                        st.markdown(f"📈 {opp}")
+                
+                # Need Attention
+                if insights.get('need_attention'):
+                    st.markdown("**⚠️ Coaching-Bedarf:**")
+                    for performer in insights['need_attention'][:3]:
+                        st.markdown(f"• **{performer['name']}**: {performer['weak_metric']}")
+        
+        # Performance-Verteilung
+        st.markdown("#### 📈 Performance-Verteilung")
+        
+        fig = go.Figure()
+        
+        # Histogram
+        fig.add_trace(go.Histogram(
+            x=detailed_df['Performance-Score'],
+            nbinsx=20,
+            name='Verkäufer',
+            marker_color='#6366F1',
+            opacity=0.7
+        ))
+        
+        # Durchschnittslinie
+        avg_score = detailed_df['Performance-Score'].mean()
+        fig.add_vline(
+            x=avg_score, 
+            line_dash="dash", 
+            line_color="red",
+            annotation_text=f"Ø {avg_score:.1f}"
+        )
+        
+        fig.update_layout(
+            title="Verteilung der Performance-Scores",
+            xaxis_title="Performance-Score",
+            yaxis_title="Anzahl Verkäufer",
+            showlegend=False,
+            height=300
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Export
+        with st.expander("📥 Daten exportieren"):
+            csv = detailed_df.to_csv(index=False)
+            st.download_button(
+                label="📊 Erweiterte Performance-Daten als CSV",
+                data=csv,
+                file_name=f"verkäufer_performance_extended_{pd.Timestamp.today().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
     """Erstellt die Verkäufer-Performance Ansicht"""
     if filter_type == "Einzelner Verkäufer" and selected_salesperson:
         seller_data = perf_data[perf_data['Verkäufer'] == selected_salesperson]
@@ -810,30 +1085,70 @@ def main():
                             st.success(f"✅ Zeige Daten für {len(selected_sellers)} ausgewählte Verkäufer")
                         
                         if 'Zugewiesen an' in df.columns:
-                            col1, col2 = st.columns([1, 3])
-                            with col1:
-                                filter_type = st.radio(
-                                    "Ansicht:",
-                                    ["Alle Verkäufer", "Einzelner Verkäufer"]
+                            # Toggle zwischen einfacher und erweiterter Ansicht
+                            view_mode = st.radio(
+                                "Ansichtsmodus:",
+                                ["🚀 Erweiterte KPI-Analyse", "📊 Einfache Übersicht"],
+                                horizontal=True
+                            )
+                            
+                            if view_mode == "🚀 Erweiterte KPI-Analyse":
+                                # Neue erweiterte Ansicht
+                                col1, col2 = st.columns([1, 3])
+                                with col1:
+                                    filter_type = st.radio(
+                                        "Ansicht:",
+                                        ["Team-Übersicht", "Einzelner Verkäufer"]
+                                    )
+                                
+                                with col2:
+                                    if filter_type == "Einzelner Verkäufer":
+                                        # Nur Verkäufer mit genug Kunden
+                                        extended_sellers = results['sales_performance_extended']['Verkäufer'].unique()
+                                        if len(extended_sellers) > 0:
+                                            selected_salesperson = st.selectbox(
+                                                "Verkäufer:",
+                                                options=extended_sellers
+                                            )
+                                        else:
+                                            selected_salesperson = None
+                                            st.warning(f"Keine Verkäufer mit mindestens {MIN_ACTIVE_CUSTOMERS} aktiven Kunden")
+                                    else:
+                                        selected_salesperson = None
+                                
+                                create_extended_sales_view(
+                                    results['sales_performance_extended'],
+                                    results['sales_summary_extended'],
+                                    results['sales_insights'],
+                                    filter_type,
+                                    selected_salesperson
                                 )
                             
-                            with col2:
-                                if filter_type == "Einzelner Verkäufer":
-                                    # Nur ausgewählte Verkäufer zur Auswahl
-                                    seller_options = selected_sellers if selected_sellers else sorted(df['Verkäufer'].unique())
-                                    selected_salesperson = st.selectbox(
-                                        "Verkäufer:",
-                                        options=seller_options
+                            else:
+                                # Alte einfache Ansicht
+                                col1, col2 = st.columns([1, 3])
+                                with col1:
+                                    filter_type = st.radio(
+                                        "Ansicht:",
+                                        ["Alle Verkäufer", "Einzelner Verkäufer"]
                                     )
-                                else:
-                                    selected_salesperson = None
-                            
-                            create_sales_performance_view(
-                                results['sales_performance'],
-                                results['sales_summary'],
-                                filter_type,
-                                selected_salesperson
-                            )
+                                
+                                with col2:
+                                    if filter_type == "Einzelner Verkäufer":
+                                        seller_options = selected_sellers if selected_sellers else sorted(df['Verkäufer'].unique())
+                                        selected_salesperson = st.selectbox(
+                                            "Verkäufer:",
+                                            options=seller_options
+                                        )
+                                    else:
+                                        selected_salesperson = None
+                                
+                                create_sales_performance_view(
+                                    results['sales_performance'],
+                                    results['sales_summary'],
+                                    filter_type,
+                                    selected_salesperson
+                                )
                         else:
                             st.warning("⚠️ Spalte 'Zugewiesen an' nicht gefunden - Verkäufer-Analyse nicht möglich")
                     
