@@ -228,12 +228,10 @@ def calculate_waterfall_data(df: pd.DataFrame, churn_events: pd.DataFrame, year:
 
 def analyze_sales_performance(df: pd.DataFrame, churn_events: pd.DataFrame, selected_sellers: list = None):
     """
-    Analysiert Churn-Performance nach Verkäufern
+    DEPRECATED: Alte simple Verkäufer-Performance Analyse
+    Nutze stattdessen: sales_analytics.analyze_sales_performance_extended()
     
-    Args:
-        df: DataFrame mit Kundendaten
-        churn_events: DataFrame mit Churn Events
-        selected_sellers: Liste der zu analysierenden Verkäufer (None = alle)
+    Diese Funktion bleibt für Rückwärtskompatibilität erhalten.
     """
     if 'Zugewiesen an' not in df.columns:
         return pd.DataFrame(), pd.DataFrame()
